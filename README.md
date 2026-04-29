@@ -73,3 +73,18 @@ Opcional:
 ```bash
 go build -o sync-bridge.exe ./cmd/app
 ```
+
+## Instalador Windows (producción)
+
+- Build release completo:
+
+```powershell
+.\scripts\build-release.ps1
+```
+
+- Resultado esperado:
+  - `dist/sycronizafhir-installer/` con binarios y scripts de instalación.
+  - `dist/sycronizafhir-installer-package.zip` para distribución/auto-update.
+  - `dist/sycronizafhir-setup.exe` si Inno Setup 6 está instalado en la máquina de build.
+
+- El setup instala en `Program Files\sycronizafhir`, solicita UAC, registra autoarranque en segundo plano (SYSTEM), crea acceso directo de escritorio y deja desinstalación disponible en “Aplicaciones instaladas” de Windows.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -25,6 +26,7 @@ import (
 )
 
 func main() {
+	isBackgroundMode := parseBackgroundMode()
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -51,7 +53,9 @@ func main() {
 	runtime.SetMeta("monitor_mode", "desktop-app-window")
 	runtime.SetMeta("app_name", "sycronizafhir")
 	runtime.SetMeta("errores_doc", "ERRORES_MONITOR.md")
-	tryOpenMonitorWindow(monitorURL)
+	if !isBackgroundMode {
+		tryOpenMonitorWindow(monitorURL)
+	}
 
 	localSummary := summarizePostgresURL(cfg.LocalPostgresURL)
 	remoteSummary := summarizePostgresURL(cfg.SupabaseDBDSN())
@@ -168,6 +172,17 @@ func main() {
 	_ = monitorServer.Shutdown(context.Background())
 	wg.Wait()
 	log.Println("sync-bridge stopped")
+}
+
+func parseBackgroundMode() bool {
+	startMode := strings.TrimSpace(strings.ToLower(os.Getenv("SYNC_APP_START_MODE")))
+	if startMode == "background" {
+		return true
+	}
+
+	backgroundFlag := flag.Bool("background", false, "inicia sin abrir la ventana de monitor")
+	flag.Parse()
+	return *backgroundFlag
 }
 
 func startMonitor(handler http.Handler) (*http.Server, net.Listener, string, error) {

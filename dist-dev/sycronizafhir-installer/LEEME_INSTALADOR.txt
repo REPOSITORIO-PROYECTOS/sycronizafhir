@@ -1,7 +1,7 @@
 SYCRONIZAFHIR - INSTALADOR RAPIDO (1 CLIC)
 
 1) Descomprimir este ZIP.
-2) Doble clic en "INSTALAR_AUTO.cmd".
+2) Doble clic en "INSTALAR_AUTO.exe".
 3) Aceptar la ventana de permisos (UAC).
 4) El instalador:
    - Detecta Windows 7 o Windows 10+.
@@ -22,6 +22,9 @@ Desinstalar:
 Detener rapido (sin desinstalar):
 - Doble clic en "DETENER_AUTO.cmd"
 - Esto detiene el proceso y deshabilita tareas automáticas.
+
+Compatibilidad:
+- Si por politica del equipo no abre el .exe, usar fallback "INSTALAR_AUTO.cmd".
 
 Auto-update GitHub:
 - Editar C:\Program Files\sycronizafhir\github-update-config.json
