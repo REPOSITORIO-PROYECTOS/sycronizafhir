@@ -27,11 +27,43 @@ function Confirm-AdminElevation {
 }
 
 function Get-TargetExeName {
-    $osVersion = [Environment]::OSVersion.Version
-    if ($osVersion.Major -eq 6 -and $osVersion.Minor -le 1) {
-        return "sycronizafhir-win7-386.exe"
-    }
     return "sycronizafhir-win10plus-amd64.exe"
+}
+
+function Test-WebView2Installed {
+    $keys = @(
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+        "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+        "HKCU:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+    )
+    foreach ($key in $keys) {
+        if (Test-Path $key) {
+            $value = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).pv
+            if ($value -and $value -ne "0.0.0.0") { return $true }
+        }
+    }
+    return $false
+}
+
+function Install-WebView2Runtime {
+    param([string]$SourceDir)
+
+    if (Test-WebView2Installed) {
+        Write-Host "[OK] WebView2 Runtime ya instalado." -ForegroundColor Green
+        return
+    }
+
+    Write-Host "WebView2 Runtime ausente. Instalando..." -ForegroundColor Yellow
+    $bootstrapper = Join-Path $SourceDir "MicrosoftEdgeWebview2Setup.exe"
+    if (-not (Test-Path $bootstrapper)) {
+        throw "No se encontro MicrosoftEdgeWebview2Setup.exe en $SourceDir. Reintenta el setup completo o instala WebView2 Runtime manualmente desde https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+    }
+
+    $process = Start-Process -FilePath $bootstrapper -ArgumentList "/silent /install" -Wait -PassThru
+    if ($process.ExitCode -ne 0) {
+        throw "El bootstrapper de WebView2 fallo (exit $($process.ExitCode))."
+    }
+    Write-Host "[OK] WebView2 Runtime instalado." -ForegroundColor Green
 }
 
 function Install-App {
@@ -111,17 +143,19 @@ function Start-AppNow {
 }
 
 function New-DesktopShortcut {
-    param([string]$TargetExe)
+    param([string]$InstallDir)
 
     $desktopPath = [Environment]::GetFolderPath("Desktop")
-    $shortcutPath = Join-Path $desktopPath "sycronizafhir.lnk"
+    $shortcutPath = Join-Path $desktopPath "Agencia TA - Sync Monitor.lnk"
+    $launcherScript = Join-Path $InstallDir "abrir-monitor-sycronizafhir.ps1"
 
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = $TargetExe
-    $shortcut.WorkingDirectory = Split-Path -Parent $TargetExe
+    $shortcut.TargetPath = "powershell.exe"
+    $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$launcherScript`""
+    $shortcut.WorkingDirectory = $InstallDir
     $shortcut.WindowStyle = 1
-    $shortcut.Description = "sycronizafhir Control Center"
+    $shortcut.Description = "Agencia TA - Monitor de sincronización"
     $shortcut.Save()
 }
 
@@ -132,12 +166,16 @@ try {
     $sourceDir = Split-Path -Parent $MyInvocation.MyCommand.Path
     $installDir = Join-Path ${env:ProgramFiles} "sycronizafhir"
 
+    Write-Step "Verificando WebView2 Runtime"
+    Install-WebView2Runtime -SourceDir $sourceDir
+
     $exePath = Install-App -SourceDir $sourceDir -InstallDir $installDir
     Write-Host "[OK] Copiado en: $exePath" -ForegroundColor Green
 
     Copy-Item (Join-Path $sourceDir "actualizar-sycronizafhir.ps1") (Join-Path $installDir "actualizar-sycronizafhir.ps1") -Force
     Copy-Item (Join-Path $sourceDir "desinstalar-sycronizafhir.ps1") (Join-Path $installDir "desinstalar-sycronizafhir.ps1") -Force
     Copy-Item (Join-Path $sourceDir "detener-sycronizafhir.ps1") (Join-Path $installDir "detener-sycronizafhir.ps1") -Force
+    Copy-Item (Join-Path $sourceDir "abrir-monitor-sycronizafhir.ps1") (Join-Path $installDir "abrir-monitor-sycronizafhir.ps1") -Force
     if (!(Test-Path (Join-Path $installDir "github-update-config.json"))) {
         Copy-Item (Join-Path $sourceDir "github-update-config.json") (Join-Path $installDir "github-update-config.json") -Force
     }
@@ -155,7 +193,7 @@ try {
     Write-Host "[OK] Aplicación iniciada como tarea en segundo plano." -ForegroundColor Green
 
     Write-Step "Creando acceso directo en Escritorio"
-    New-DesktopShortcut -TargetExe $exePath
+    New-DesktopShortcut -InstallDir $installDir
     Write-Host "[OK] Acceso directo creado en el Escritorio." -ForegroundColor Green
 
     Write-Host "`nInstalación completada." -ForegroundColor Green

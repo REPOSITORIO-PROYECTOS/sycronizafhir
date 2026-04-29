@@ -24,10 +24,16 @@ try {
     Get-Process -Name "sycronizafhir" -ErrorAction SilentlyContinue | Stop-Process -Force
 
     $desktopPath = [Environment]::GetFolderPath("Desktop")
-    $shortcutPath = Join-Path $desktopPath "sycronizafhir.lnk"
-    if (Test-Path $shortcutPath) {
-        Remove-Item $shortcutPath -Force
-        Write-Host "[OK] Acceso directo eliminado del escritorio." -ForegroundColor Green
+    $shortcutNames = @(
+        "sycronizafhir.lnk",
+        "Agencia TA - Sync Monitor.lnk"
+    )
+    foreach ($shortcutName in $shortcutNames) {
+        $shortcutPath = Join-Path $desktopPath $shortcutName
+        if (Test-Path $shortcutPath) {
+            Remove-Item $shortcutPath -Force
+            Write-Host "[OK] Acceso directo eliminado del escritorio: $shortcutName" -ForegroundColor Green
+        }
     }
 
     $installDir = Join-Path ${env:ProgramFiles} "sycronizafhir"

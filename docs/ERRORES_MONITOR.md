@@ -1,5 +1,16 @@
 # Guia rapida de errores del monitor
 
+## no se abre la ventana de la app
+
+- **Que significa**: el ejecutable no puede iniciar la UI embebida.
+- **Causa mas comun**:
+  - Falta `Microsoft Edge WebView2 Runtime`.
+  - Instalacion incompleta en `Program Files\sycronizafhir`.
+- **Que revisar**:
+  - Ejecutar nuevamente el setup (`agencia-ta-soluciones-setup.exe`) como admin.
+  - Verificar que exista `MicrosoftEdgeWebview2Setup.exe` en el paquete de instalacion.
+  - Ver logs recientes en la vista `Logs` del Control Center.
+
 ## realtime websocket: bad handshake
 
 - **Que significa**: Supabase Realtime rechazo el handshake HTTP del websocket.
@@ -28,5 +39,14 @@
 ## monitor port ocupado
 
 - **Que significa**: 8088/8089/8090 estaban en uso.
-- **Comportamiento actual**: la app busca otro puerto libre automaticamente.
+- **Estado actual**: en arquitectura Wails este escenario ya no aplica para UI.
+- **Nota**: la ventana desktop usa IPC nativo (sin puertos HTTP locales para el monitor).
+
+## instancia en segundo plano no cede control a la ventana
+
+- **Que significa**: hay una instancia `--background` ejecutando workers y al abrir la UI no toma control.
+- **Que revisar**:
+  - Confirmar que no haya multiples procesos `sycronizafhir.exe` colgados.
+  - Ejecutar `detener-sycronizafhir.ps1` y abrir nuevamente desde el acceso directo.
+  - Si persiste, reinstalar para reprovisionar tareas programadas.
 

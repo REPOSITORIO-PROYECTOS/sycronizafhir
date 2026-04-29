@@ -70,6 +70,18 @@ func Load() (Config, error) {
 		return Config{}, errors.New("HOST_SUPABASE, USUARIO_SUPABASE and CONTRASENA_SUPABASE are required")
 	}
 
+	if strings.TrimSpace(cfg.SupabaseRealtimeURL) == "" {
+		return Config{}, errors.New("SUPABASE_REALTIME_URL is required")
+	}
+
+	if strings.TrimSpace(cfg.SupabaseServiceRole) == "" {
+		return Config{}, errors.New("SUPABASE_SERVICE_ROLE_KEY is required")
+	}
+
+	if isPlaceholderSecret(cfg.SupabaseServiceRole) {
+		return Config{}, errors.New("SUPABASE_SERVICE_ROLE_KEY is using a placeholder value")
+	}
+
 	return cfg, nil
 }
 
@@ -145,4 +157,27 @@ func readIntOrDefaultNoError(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func isPlaceholderSecret(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return true
+	}
+
+	placeholderFragments := []string{
+		"your-service-role-key",
+		"your-project",
+		"changeme",
+		"replace-me",
+		"placeholder",
+	}
+
+	for _, fragment := range placeholderFragments {
+		if strings.Contains(normalized, fragment) {
+			return true
+		}
+	}
+
+	return false
 }

@@ -1,0 +1,15 @@
+{
+  "fixed": {
+    "file_version": "1.0.0.0"
+  },
+  "info": {
+    "0000": {
+      "ProductVersion": "1.0.0.0",
+      "CompanyName": "Agencia TA, Soluciones Empresariales",
+      "FileDescription": "sycronizafhir Control Center",
+      "LegalCopyright": "Copyright Agencia TA",
+      "ProductName": "sycronizafhir",
+      "Comments": "Monitor y orquestador de sincronizacion bidireccional Postgres <-> Supabase"
+    }
+  }
+}

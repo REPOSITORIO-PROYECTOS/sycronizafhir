@@ -1,15 +1,20 @@
-# sync-bridge
+# sycronizafhir
 
-Sync middleware bidireccional entre PostgreSQL local (legacy) y Supabase.
+Sync middleware bidireccional entre PostgreSQL local (legacy) y Supabase, con
+Control Center desktop embebido en Wails (sin browser y sin puertos HTTP
+locales).
 
 ## Estructura
 
-- `cmd/app/main.go`: arranque y ciclo de vida.
+- `main.go`: arranque y ciclo de vida de la app Wails + workers.
+- `app.go`: bindings Go expuestos al frontend Wails.
+- `frontend/`: UI React + TypeScript + Vite + Tailwind.
 - `internal/config`: carga/validacion de variables de entorno.
 - `internal/db`: acceso a PostgreSQL local y cola de fallback SQLite.
 - `internal/supabase`: clientes Postgres directo y Realtime WebSocket.
 - `internal/sync`: workers outbound/inbound.
 - `internal/models`: modelos de dominio.
+- `cmd/dbscan/main.go`: scanner de schema y reporte por email.
 
 ## Requisitos
 
@@ -32,12 +37,21 @@ Sync middleware bidireccional entre PostgreSQL local (legacy) y Supabase.
 
 Esto permite adaptarse al esquema real legacy sin reescribir codigo por cada tabla nueva.
 
-## Ejecucion
+## Ejecucion (desktop)
 
 ```bash
 go mod tidy
-go run ./cmd/app
+cd frontend && npm install && cd ..
+go run .
 ```
+
+### Modo background
+
+```bash
+go run . --background
+```
+
+En background no abre ventana; solamente ejecuta workers de sync.
 
 ## Escaneo completo de DB (schema snapshot)
 
@@ -71,7 +85,11 @@ Opcional:
 ## Build
 
 ```bash
-go build -o sync-bridge.exe ./cmd/app
+# Build de frontend
+cd frontend && npm run build && cd ..
+
+# Build de backend/app desktop
+go build -o sycronizafhir.exe .
 ```
 
 ## Instalador Windows (producción)
@@ -85,6 +103,16 @@ go build -o sync-bridge.exe ./cmd/app
 - Resultado esperado:
   - `dist/sycronizafhir-installer/` con binarios y scripts de instalación.
   - `dist/sycronizafhir-installer-package.zip` para distribución/auto-update.
-  - `dist/sycronizafhir-setup.exe` si Inno Setup 6 está instalado en la máquina de build.
+  - `dist/agencia-ta-soluciones-setup.exe` si Inno Setup 6 está instalado en la máquina de build.
+
+- Requisitos de build desktop:
+  - Go 1.24+
+  - Node 20+
+  - npm (usado por Wails para compilar `frontend/`)
+  - Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`)
+
+- La compilación de release **no usa UPX por defecto** (recomendado para minimizar falsos positivos de AV/SmartScreen en Windows).
+
+- El setup incluye bootstrapper de WebView2 (`MicrosoftEdgeWebview2Setup.exe`) y lo instala en modo silencioso si el runtime no está presente.
 
 - El setup instala en `Program Files\sycronizafhir`, solicita UAC, registra autoarranque en segundo plano (SYSTEM), crea acceso directo de escritorio y deja desinstalación disponible en “Aplicaciones instaladas” de Windows.

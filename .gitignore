@@ -15,6 +15,10 @@ reports/
 *.dylib
 *.out
 dist/
+build/bin/
+frontend/node_modules/
+frontend/dist/
+frontend/wailsjs/
 
 # Packaging artifacts
 release/

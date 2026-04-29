@@ -1,0 +1,19 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "sycronizafhir",
+  "outputfilename": "sycronizafhir",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "Agencia TA, Soluciones Empresariales"
+  },
+  "info": {
+    "companyName": "Agencia TA, Soluciones Empresariales",
+    "productName": "sycronizafhir",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright Agencia TA",
+    "comments": "Sincronizacion bidireccional Postgres local <-> Supabase"
+  }
+}

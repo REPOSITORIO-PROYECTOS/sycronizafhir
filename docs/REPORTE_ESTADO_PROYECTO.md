@@ -1,7 +1,7 @@
 # Reporte de estado del proyecto `sycronizafhir`
 
 Fecha: 2026-04-29
-Tipo de analisis: revision estatica de codigo y documentacion del repositorio.
+Tipo de analisis: revision estatica + reevaluacion de compilacion Wails/Go.
 
 ## 1) Estado general del proyecto
 
@@ -119,6 +119,53 @@ Sin cambiar arquitectura base, los siguientes pasos mejorarian observabilidad y 
 4. Definir umbrales/alertas sobre errores recurrentes de inbound/outbound.
 5. Estandarizar un checklist de release usando `dbscan` + `diagnostico-postgres.ps1` + `scan/export`.
 
-## 6) Conclusion
+## 5.1) Recomendaciones de desarrollo (incorporadas)
+
+1. **Single-instance con cierre limpio (prioridad alta)**
+   - Reemplazar estrategia de kill agresivo para traspaso entre instancia background y UI.
+   - Implementar señal local (Named Pipe o `.lock` con comando) para solicitar `graceful shutdown`.
+   - Asegurar orden de cierre: detener workers, vaciar/confirmar cola, cerrar SQLite y luego relanzar.
+   - Motivo: reducir riesgo de corrupcion de la cola SQLite en cortes forzados.
+
+2. **Evitar UPX en Windows para releases normales (prioridad alta)**
+   - No usar `wails build -upx` salvo excepcion justificada y testeada.
+   - Mantener binarios sin compresion UPX para disminuir falsos positivos en Defender/SmartScreen.
+   - Motivo: la reduccion de tamano no compensa el impacto de reputacion y detecciones.
+
+3. **`bridge.ts` con fallback de mocks para acelerar UI (prioridad media-alta)**
+   - Si no existe runtime Wails (`!window.go`), devolver respuestas mock JSON.
+   - Permitir iteracion de UI con `pnpm dev` en navegador sin recompilar backend Go.
+   - Definir mocks minimos de estados operativos y de error para validar UX temprana.
+
+4. **Secuencia de ejecucion sugerida (prioridad media)**
+   - Separar primero logica de Go y contratos del bridge.
+   - Validar puente con una accion minima extremo a extremo.
+   - Construir UI completa sobre mocks y luego conectar a runtime real.
+   - Ajustar instalador al final, con validacion en VM limpia.
+
+## 5.2) Puntos concretos a corregir
+
+- El traspaso de control background/UI no debe depender de `taskkill /F` sobre proceso activo con SQLite abierta.
+- La documentacion de build debe explicitar que UPX queda deshabilitado por defecto en Windows.
+- El frontend debe contar con modo mock oficial en `bridge.ts` para desarrollo local desacoplado.
+
+## 6) Reevaluacion de compilacion (actualizada)
+
+Estado actual verificado en esta corrida:
+
+- `frontend`: `npm run build` OK (TypeScript + Vite).
+- `backend`: `go build ./...` OK.
+- `desktop`: `wails build -platform windows/amd64` OK.
+- `release`: `scripts/build-release.ps1` OK.
+- `setup`: Inno Setup OK, artefacto generado en `dist/agencia-ta-soluciones-setup.exe`.
+
+Correcciones aplicadas para estabilizar build:
+
+- Se agrego tipado de Node para `vite.config.ts` (`@types/node` + `types: ["node"]`).
+- Se corrigio un error de inferencia TypeScript en `DashboardView.tsx`.
+- Se ajusto `tsconfig.json` para evitar chequeo de JS generado en `wailsjs/`.
+- Se actualizo pipeline de release para compilar con `wails build` e incluir bootstrapper de WebView2.
+
+## 7) Conclusion
 
 `sycronizafhir` muestra una base solida para operacion real: sincronizacion, fallback, monitoreo y diagnostico estan presentes. El principal siguiente salto de calidad es incorporar verificacion automatizada (tests/CI) y trazabilidad historica de salud para detectar regresiones antes de incidentes.

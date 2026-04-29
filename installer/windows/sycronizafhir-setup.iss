@@ -1,6 +1,6 @@
-#define MyAppName "sycronizafhir"
+#define MyAppName "Agencia TA, Soluciones Empresariales"
 #define MyAppVersion "1.0.0"
-#define MyAppPublisher "Sycroniza"
+#define MyAppPublisher "Agencia TA, Soluciones Empresariales"
 #define MyAppExeName "sycronizafhir-setup-launcher.exe"
 
 [Setup]
@@ -12,7 +12,7 @@ DefaultDirName={autopf}\sycronizafhir
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 OutputDir={#OutputDir}
-OutputBaseFilename=sycronizafhir-setup
+OutputBaseFilename=agencia-ta-soluciones-setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -27,7 +27,8 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 Source: "{#SourceDir}\*"; DestDir: "{tmp}\sycronizafhir-installer"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{tmp}\sycronizafhir-installer\instalar-sycronizafhir.ps1"""; StatusMsg: "Instalando servicios y configurando arranque en segundo plano..."; Flags: runhidden waituntilterminated
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{tmp}\sycronizafhir-installer\instalar-sycronizafhir.ps1"""; StatusMsg: "Instalando WebView2 Runtime, servicios y configurando arranque en segundo plano..."; Flags: runhidden waituntilterminated
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\abrir-monitor-sycronizafhir.ps1"""; Description: "Abrir aplicacion (monitor de sincronizacion)"; Flags: postinstall nowait skipifsilent unchecked
 
 [UninstallRun]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\desinstalar-sycronizafhir.ps1"""; Flags: runhidden waituntilterminated
@@ -35,8 +36,9 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 [Code]
 procedure InitializeWizard;
 begin
-  WizardForm.WelcomeLabel1.Caption := 'Instalador de sycronizafhir';
+  WizardForm.WelcomeLabel1.Caption := 'Instalador de Agencia TA, Soluciones Empresariales';
   WizardForm.WelcomeLabel2.Caption :=
-    'Este programa instala y configura la sincronización bidireccional entre base local y Supabase.'#13#10 +
-    'La aplicación quedará ejecutándose en segundo plano y podrá abrirse desde el acceso directo del escritorio.';
+    'Este programa instala y configura la sincronizacion bidireccional entre base local y Supabase.'#13#10 +
+    'Si tu equipo no tiene Microsoft Edge WebView2 Runtime, sera instalado automaticamente.'#13#10 +
+    'La aplicacion quedara ejecutandose en segundo plano y podra abrirse desde el acceso directo del Escritorio.';
 end;
