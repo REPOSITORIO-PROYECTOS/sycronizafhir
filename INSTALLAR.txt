@@ -1,0 +1,13 @@
+SYNC-BRIDGE - INSTALACION RAPIDA (WINDOWS)
+
+1) Descomprimir el ZIP en una carpeta del servidor (ej: C:\SyncBridge).
+2) Copiar ".env.example" como ".env" y completar credenciales reales.
+3) Ejecutar "sync-bridge.exe".
+4) Abrir el monitor en navegador:
+   http://127.0.0.1:8088
+
+Opcional servicio:
+- Registrar con NSSM para iniciar junto con Windows.
+- Comando sugerido:
+  nssm install SyncBridge "C:\SyncBridge\sync-bridge.exe"
+

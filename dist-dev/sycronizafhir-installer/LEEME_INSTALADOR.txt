@@ -1,0 +1,31 @@
+SYCRONIZAFHIR - INSTALADOR RAPIDO (1 CLIC)
+
+1) Descomprimir este ZIP.
+2) Doble clic en "INSTALAR_AUTO.cmd".
+3) Aceptar la ventana de permisos (UAC).
+4) El instalador:
+   - Detecta Windows 7 o Windows 10+.
+   - Instala el ejecutable correcto.
+   - Solicita permisos de administrador automaticamente (UAC).
+   - Registra inicio automatico con Windows.
+   - Corre en segundo plano todo el tiempo.
+   - Reintenta inicio automatico si el proceso cae.
+   - Inicia la aplicacion al terminar.
+   - Crea acceso directo en el Escritorio.
+   - Registra auto-update diario desde GitHub Releases (si se habilita en config).
+
+No requiere .env ni configuracion manual.
+
+Desinstalar:
+- Ejecutar "desinstalar-sycronizafhir.ps1" como Administrador.
+
+Detener rapido (sin desinstalar):
+- Doble clic en "DETENER_AUTO.cmd"
+- Esto detiene el proceso y deshabilita tareas automáticas.
+
+Auto-update GitHub:
+- Editar C:\Program Files\sycronizafhir\github-update-config.json
+- Completar owner/repo/asset.
+- Poner "enabled": true
+- La tarea "sycronizafhir-auto-update" revisa nuevas releases y aplica update.
+

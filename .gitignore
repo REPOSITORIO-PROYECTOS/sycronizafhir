@@ -1,0 +1,32 @@
+# Secrets / local config
+.env
+.env.local
+.env.*.local
+
+# Databases / runtime state
+*.db
+*.sqlite
+reports/
+
+# Build outputs
+*.exe
+*.dll
+*.so
+*.dylib
+*.out
+dist/
+
+# Packaging artifacts
+release/
+*.zip
+dist-dev/sync-bridge-base/
+
+# IDE / tooling
+.cursor/
+.vscode/
+.idea/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
