@@ -50,6 +50,22 @@ export interface ConfigSummary {
   table: string;
 }
 
+export interface LocalConnectionInput {
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  database: string;
+  ssl_mode: string;
+}
+
+export interface LocalConnectionResult {
+  success: boolean;
+  message: string;
+  dsn?: string;
+  dbs?: string[];
+}
+
 export interface ComponentEventPayload {
   name: string;
   state: ComponentState;

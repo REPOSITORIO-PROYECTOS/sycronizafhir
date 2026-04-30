@@ -1,5 +1,7 @@
 import type {
   ConfigSummary,
+  LocalConnectionInput,
+  LocalConnectionResult,
   ScanResult,
   Snapshot,
 } from "@/types/domain";
@@ -10,6 +12,16 @@ interface AppBindings {
   RunCompare: () => Promise<ScanResult>;
   ExportLastScan: () => Promise<ScanResult | null>;
   GetConfigSummary: () => Promise<ConfigSummary>;
+  GetLocalConnectionDraft: () => Promise<LocalConnectionInput>;
+  TestLocalConnection: (
+    input: LocalConnectionInput
+  ) => Promise<LocalConnectionResult>;
+  ListLocalDatabases: (
+    input: LocalConnectionInput
+  ) => Promise<LocalConnectionResult>;
+  SaveLocalConnection: (
+    input: LocalConnectionInput
+  ) => Promise<LocalConnectionResult>;
 }
 
 interface WailsRuntime {
@@ -93,6 +105,15 @@ const mockConfig: ConfigSummary = {
   table: "pedidos",
 };
 
+const mockLocalDraft: LocalConnectionInput = {
+  host: "127.0.0.1",
+  port: 5432,
+  user: "postgres",
+  password: "",
+  database: "postgres",
+  ssl_mode: "disable",
+};
+
 const mockScan: ScanResult = {
   scanned_at: new Date().toISOString(),
   status: "ok",
@@ -138,6 +159,48 @@ export const bridge = {
       return wailsWindow.go!.main!.App!.GetConfigSummary();
     }
     return mockConfig;
+  },
+  async getLocalConnectionDraft(): Promise<LocalConnectionInput> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.GetLocalConnectionDraft();
+    }
+    return mockLocalDraft;
+  },
+  async testLocalConnection(
+    input: LocalConnectionInput
+  ): Promise<LocalConnectionResult> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.TestLocalConnection(input);
+    }
+    return {
+      success: true,
+      message: "Conexion local mock OK",
+      dsn: `postgres://${input.user}:***@${input.host}:${input.port}/${input.database}?sslmode=${input.ssl_mode}`,
+    };
+  },
+  async listLocalDatabases(
+    input: LocalConnectionInput
+  ): Promise<LocalConnectionResult> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.ListLocalDatabases(input);
+    }
+    return {
+      success: true,
+      message: "Bases mock detectadas",
+      dbs: ["postgres", "mascotas", "legacy"],
+    };
+  },
+  async saveLocalConnection(
+    input: LocalConnectionInput
+  ): Promise<LocalConnectionResult> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.SaveLocalConnection(input);
+    }
+    return {
+      success: true,
+      message: "Configuracion mock guardada",
+      dsn: `postgres://${input.user}:***@${input.host}:${input.port}/${input.database}?sslmode=${input.ssl_mode}`,
+    };
   },
   on(event: string, handler: (payload: unknown) => void): () => void {
     if (!isWailsAvailable()) {

@@ -62,6 +62,10 @@ func Load() (Config, error) {
 		ExcludeTables:       readCSV("SYNC_EXCLUDE_TABLES"),
 	}
 
+	if override, ok, overrideErr := LoadLocalDBOverride(); overrideErr == nil && ok {
+		cfg.LocalPostgresURL = override.LocalPostgresURL
+	}
+
 	if cfg.LocalPostgresURL == "" {
 		return Config{}, errors.New("LOCAL_POSTGRES_URL is required")
 	}
