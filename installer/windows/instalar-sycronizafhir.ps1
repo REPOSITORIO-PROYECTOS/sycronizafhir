@@ -176,9 +176,7 @@ try {
     Copy-Item (Join-Path $sourceDir "desinstalar-sycronizafhir.ps1") (Join-Path $installDir "desinstalar-sycronizafhir.ps1") -Force
     Copy-Item (Join-Path $sourceDir "detener-sycronizafhir.ps1") (Join-Path $installDir "detener-sycronizafhir.ps1") -Force
     Copy-Item (Join-Path $sourceDir "abrir-monitor-sycronizafhir.ps1") (Join-Path $installDir "abrir-monitor-sycronizafhir.ps1") -Force
-    if (!(Test-Path (Join-Path $installDir "github-update-config.json"))) {
-        Copy-Item (Join-Path $sourceDir "github-update-config.json") (Join-Path $installDir "github-update-config.json") -Force
-    }
+    Copy-Item (Join-Path $sourceDir "github-update-config.json") (Join-Path $installDir "github-update-config.json") -Force
 
     Write-Step "Registrando inicio automático con Windows"
     Register-StartupTask -ExePath $exePath
