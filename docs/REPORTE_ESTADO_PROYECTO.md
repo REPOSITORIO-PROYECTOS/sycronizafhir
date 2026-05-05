@@ -169,3 +169,7 @@ Correcciones aplicadas para estabilizar build:
 ## 7) Conclusion
 
 `sycronizafhir` muestra una base solida para operacion real: sincronizacion, fallback, monitoreo y diagnostico estan presentes. El principal siguiente salto de calidad es incorporar verificacion automatizada (tests/CI) y trazabilidad historica de salud para detectar regresiones antes de incidentes.
+
+## 8) Backlog y datos (actualizado 2026-04-30)
+
+Para requisitos de esquema (`fecha_modificacion`, PK), alineacion con Supabase, seleccion futura de bases/tablas y checklist operativo Windows, ver `docs/BACKLOG_PROXIMAS_ACTUALIZACIONES.md`.

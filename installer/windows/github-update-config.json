@@ -1,7 +1,7 @@
 {
-  "enabled": false,
-  "github_owner": "TU_OWNER",
-  "github_repo": "TU_REPO",
+  "enabled": true,
+  "github_owner": "REPOSITORIO-PROYECTOS",
+  "github_repo": "sycronizafhir",
   "release_asset_name": "sycronizafhir-installer-package.zip",
   "github_token": ""
 }
