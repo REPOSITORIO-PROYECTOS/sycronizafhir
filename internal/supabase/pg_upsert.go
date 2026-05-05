@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -56,9 +57,27 @@ func (c *PGClient) UpsertRows(ctx context.Context, schemaName, tableName string,
 		}
 		columnNames = append(columnNames, key)
 	}
+	allowedColumns, err := c.readTableColumns(ctx, schemaName, tableName)
+	if err != nil {
+		return err
+	}
+	columnNames = filterAllowedColumns(columnNames, allowedColumns)
+	if len(columnNames) == 0 {
+		return fmt.Errorf("no compatible columns for target table %s.%s", schemaName, tableName)
+	}
+
+	filteredConflicts := filterAllowedColumns(conflictColumns, allowedColumns)
+	if len(filteredConflicts) == 0 {
+		return fmt.Errorf("no compatible conflict columns for target table %s.%s", schemaName, tableName)
+	}
+	for _, name := range filteredConflicts {
+		if !slices.Contains(columnNames, name) {
+			return fmt.Errorf("conflict column %s missing in payload for %s.%s", name, schemaName, tableName)
+		}
+	}
 
 	for _, row := range rows {
-		if err := c.upsertSingleRow(ctx, schemaName, tableName, columnNames, conflictColumns, row); err != nil {
+		if err = c.upsertSingleRow(ctx, schemaName, tableName, columnNames, filteredConflicts, row); err != nil {
 			return err
 		}
 	}
@@ -118,4 +137,46 @@ func (c *PGClient) upsertSingleRow(ctx context.Context, schemaName, tableName st
 
 func quoteIdentifier(identifier string) string {
 	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
+}
+
+func (c *PGClient) readTableColumns(ctx context.Context, schemaName, tableName string) (map[string]bool, error) {
+	const query = `
+		SELECT column_name
+		FROM information_schema.columns
+		WHERE table_schema = $1
+		  AND table_name = $2`
+
+	rows, err := c.pool.Query(ctx, query, schemaName, tableName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var columnName string
+		if err = rows.Scan(&columnName); err != nil {
+			return nil, err
+		}
+		columns[columnName] = true
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(columns) == 0 {
+		return nil, fmt.Errorf("target table has no columns or does not exist: %s.%s", schemaName, tableName)
+	}
+
+	return columns, nil
+}
+
+func filterAllowedColumns(columns []string, allowed map[string]bool) []string {
+	filtered := make([]string, 0, len(columns))
+	for _, columnName := range columns {
+		if allowed[columnName] {
+			filtered = append(filtered, columnName)
+		}
+	}
+	return filtered
 }

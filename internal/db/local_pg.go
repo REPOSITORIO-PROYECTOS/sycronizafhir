@@ -181,10 +181,23 @@ func (db *LocalPG) LoadUpdatedRows(ctx context.Context, schemaName, tableName st
 		return nil, fmt.Errorf("invalid table name: %s", tableName)
 	}
 
+	isDateColumn, err := db.isFechaModificacionDate(ctx, schemaName, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	whereClause := "fecha_modificacion > $1"
+	if isDateColumn {
+		// Legacy tables often persist only DATE precision. Using >= date avoids
+		// losing same-day changes after checkpoint moves to current timestamp.
+		whereClause = "fecha_modificacion >= $1::date"
+	}
+
 	query := fmt.Sprintf(
-		`SELECT * FROM %s.%s WHERE fecha_modificacion > $1 ORDER BY fecha_modificacion ASC`,
+		`SELECT * FROM %s.%s WHERE fecha_modificacion IS NOT NULL AND %s ORDER BY fecha_modificacion ASC`,
 		schemaName,
 		tableName,
+		whereClause,
 	)
 
 	rows, err := db.pool.Query(ctx, query, since)
@@ -210,6 +223,23 @@ func (db *LocalPG) LoadUpdatedRows(ctx context.Context, schemaName, tableName st
 	}
 
 	return result, rows.Err()
+}
+
+func (db *LocalPG) isFechaModificacionDate(ctx context.Context, schemaName, tableName string) (bool, error) {
+	const query = `
+		SELECT data_type
+		FROM information_schema.columns
+		WHERE table_schema = $1
+		  AND table_name = $2
+		  AND column_name = 'fecha_modificacion'
+		LIMIT 1`
+
+	var dataType string
+	if err := db.pool.QueryRow(ctx, query, schemaName, tableName).Scan(&dataType); err != nil {
+		return false, err
+	}
+
+	return dataType == "date", nil
 }
 
 func (db *LocalPG) readPrimaryKeys(ctx context.Context, schemaName, tableName string) ([]string, error) {
