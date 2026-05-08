@@ -1,5 +1,5 @@
 #define MyAppName "Agencia TA, Soluciones Empresariales"
-#define MyAppVersion "1.4.0"
+#define MyAppVersion "1.4.1"
 #define MyAppPublisher "Agencia TA, Soluciones Empresariales"
 #define MyAppExeName "sycronizafhir-setup-launcher.exe"
 
