@@ -3,8 +3,10 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -219,6 +221,74 @@ func (db *LocalPG) LoadUpdatedRows(ctx context.Context, schemaName, tableName st
 			item[string(field.Name)] = values[index]
 		}
 
+		result = append(result, item)
+	}
+
+	return result, rows.Err()
+}
+
+func (db *LocalPG) CountTableRows(ctx context.Context, schemaName, tableName string) (int64, error) {
+	if !safeIdentifierPattern.MatchString(schemaName) {
+		return 0, fmt.Errorf("invalid schema name: %s", schemaName)
+	}
+	if !safeIdentifierPattern.MatchString(tableName) {
+		return 0, fmt.Errorf("invalid table name: %s", tableName)
+	}
+
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM %s.%s`, schemaName, tableName)
+	var total int64
+	if err := db.pool.QueryRow(ctx, query).Scan(&total); err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func (db *LocalPG) LoadTableRowsChunk(ctx context.Context, schemaName, tableName string, offset, limit int, orderBy []string) ([]map[string]interface{}, error) {
+	if !safeIdentifierPattern.MatchString(schemaName) {
+		return nil, fmt.Errorf("invalid schema name: %s", schemaName)
+	}
+	if !safeIdentifierPattern.MatchString(tableName) {
+		return nil, fmt.Errorf("invalid table name: %s", tableName)
+	}
+	if offset < 0 || limit <= 0 {
+		return nil, errors.New("invalid pagination values")
+	}
+
+	orderColumns := make([]string, 0, len(orderBy))
+	for _, column := range orderBy {
+		if !safeIdentifierPattern.MatchString(column) {
+			return nil, fmt.Errorf("invalid order column: %s", column)
+		}
+		orderColumns = append(orderColumns, column)
+	}
+	if len(orderColumns) == 0 {
+		orderColumns = append(orderColumns, "fecha_modificacion")
+	}
+
+	query := fmt.Sprintf(
+		`SELECT * FROM %s.%s ORDER BY %s ASC LIMIT $1 OFFSET $2`,
+		schemaName,
+		tableName,
+		strings.Join(orderColumns, ", "),
+	)
+	rows, err := db.pool.Query(ctx, query, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	fieldDescriptions := rows.FieldDescriptions()
+	result := make([]map[string]interface{}, 0, limit)
+	for rows.Next() {
+		values, valuesErr := rows.Values()
+		if valuesErr != nil {
+			return nil, valuesErr
+		}
+
+		item := make(map[string]interface{}, len(values))
+		for index, field := range fieldDescriptions {
+			item[string(field.Name)] = values[index]
+		}
 		result = append(result, item)
 	}
 

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -16,8 +17,26 @@ type PGClient struct {
 
 var safeIdentifierRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
+// PoolConfigFromDSN parses a DSN for use with Supabase Postgres (incl. pooler en modo transacción),
+// evitando prepared statements persistentes que provocan SQLSTATE 42P05.
+func PoolConfigFromDSN(dsn string) (*pgxpool.Config, error) {
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+	cfg.ConnConfig.StatementCacheCapacity = 0
+	cfg.ConnConfig.DescriptionCacheCapacity = 0
+	return cfg, nil
+}
+
 func NewPGClient(ctx context.Context, dsn string) (*PGClient, error) {
-	pool, err := pgxpool.New(ctx, dsn)
+	cfg, err := PoolConfigFromDSN(dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}

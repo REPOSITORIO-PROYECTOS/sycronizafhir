@@ -1,3 +1,10 @@
+-- =============================================================================
+-- SOLO base PostgreSQL LOCAL (legacy / mascotas). Ejecutar en el servidor donde
+-- corre el bridge con LOCAL_POSTGRES_URL — NO es el script principal de Supabase.
+--
+-- En la NUBE (Supabase): usar sql/000_supabase_prep_completo.sql
+-- =============================================================================
+--
 -- Columnas/indices de control de subida
 ALTER TABLE clientes
 ADD COLUMN IF NOT EXISTS fecha_modificacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP;

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"sycronizafhir/internal/config"
@@ -76,7 +77,8 @@ func (w *OutboundWorker) Run(ctx context.Context) {
 
 func (w *OutboundWorker) runCycle(ctx context.Context) error {
 	if err := w.retryQueuedOutbound(ctx); err != nil {
-		log.Printf("retry queued outbound failed: %v", err)
+		log.Printf("retry queued outbound completed with errors: %v", err)
+		w.runtime.AddLog(fmt.Sprintf("outbound retry queue warning: %v", err))
 	}
 
 	tables, err := w.localPG.ListSyncTables(ctx, w.sourceSchema, w.excludeTables)
@@ -84,6 +86,7 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 		return err
 	}
 
+	failedTables := make([]string, 0)
 	for _, table := range tables {
 		rows, readErr := w.localPG.LoadUpdatedRows(ctx, w.sourceSchema, table.Name, w.lastRun)
 		if readErr != nil {
@@ -103,7 +106,9 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 			if marshalErr == nil {
 				_ = w.queue.Enqueue(ctx, outboundGenericDirection, string(raw))
 			}
-			return err
+			failedTables = append(failedTables, table.Name)
+			log.Printf("outbound table upsert failed for %s: %v", table.Name, err)
+			w.runtime.AddLog(fmt.Sprintf("outbound table %s queued after upsert error: %v", table.Name, err))
 		}
 	}
 
@@ -111,6 +116,10 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 	w.lastRun = now
 	if err = w.persistCheckpoint(ctx, now); err != nil {
 		log.Printf("persist outbound checkpoint failed: %v", err)
+	}
+
+	if len(failedTables) > 0 {
+		return fmt.Errorf("outbound completed with queued errors for tables: %s", strings.Join(failedTables, ", "))
 	}
 	return nil
 }
@@ -121,6 +130,7 @@ func (w *OutboundWorker) retryQueuedOutbound(ctx context.Context) error {
 		return err
 	}
 
+	failedJobs := make([]string, 0)
 	for _, job := range jobs {
 		var payload queuedOutboundPayload
 		if err = json.Unmarshal([]byte(job.PayloadJSON), &payload); err != nil {
@@ -129,12 +139,19 @@ func (w *OutboundWorker) retryQueuedOutbound(ctx context.Context) error {
 		}
 
 		if err = w.pgClient.UpsertRows(ctx, "public", payload.TableName, payload.Rows, payload.ConflictColumns); err != nil {
-			return err
+			failedJobs = append(failedJobs, fmt.Sprintf("%d:%s", job.ID, payload.TableName))
+			log.Printf("retry queued outbound job failed id=%d table=%s: %v", job.ID, payload.TableName, err)
+			w.runtime.AddLog(fmt.Sprintf("retry queued outbound failed id=%d table=%s: %v", job.ID, payload.TableName, err))
+			continue
 		}
 
 		if err = w.queue.Delete(ctx, job.ID); err != nil {
 			return err
 		}
+	}
+
+	if len(failedJobs) > 0 {
+		return fmt.Errorf("queued outbound jobs still failing: %s", strings.Join(failedJobs, ", "))
 	}
 
 	return nil

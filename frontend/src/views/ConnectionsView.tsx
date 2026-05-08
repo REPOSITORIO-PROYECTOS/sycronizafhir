@@ -66,12 +66,18 @@ export function ConnectionsView() {
     queryFn: () => bridge.getLocalConnectionDraft(),
   });
 
+  const { data: bootstrapStatus } = useQuery({
+    queryKey: ["bootstrap-status"],
+    queryFn: () => bridge.getInitialLoadStatus(),
+    refetchInterval: 3000,
+  });
+
   const [form, setForm] = useState<LocalConnectionInput>({
     host: "127.0.0.1",
     port: 5432,
     user: "postgres",
     password: "",
-    database: "postgres",
+    database: "mascotas",
     ssl_mode: "disable",
   });
   const [detectedDBs, setDetectedDBs] = useState<string[]>([]);
@@ -117,6 +123,22 @@ export function ConnectionsView() {
       setFeedback({ ok: result.success, text: result.message });
       await queryClient.invalidateQueries({ queryKey: ["config-summary"] });
       await queryClient.invalidateQueries({ queryKey: ["snapshot"] });
+    },
+    onError: (error: Error) => setFeedback({ ok: false, text: error.message }),
+  });
+
+  const resolveSourceMutation = useMutation({
+    mutationFn: () => bridge.resolveDatabaseSource(),
+    onSuccess: (result) =>
+      setFeedback({ ok: result.success, text: result.message }),
+    onError: (error: Error) => setFeedback({ ok: false, text: error.message }),
+  });
+
+  const bootstrapMutation = useMutation({
+    mutationFn: () => bridge.startInitialFullLoad(),
+    onSuccess: async (result) => {
+      setFeedback({ ok: result.success, text: result.message });
+      await queryClient.invalidateQueries({ queryKey: ["bootstrap-status"] });
     },
     onError: (error: Error) => setFeedback({ ok: false, text: error.message }),
   });
@@ -304,6 +326,70 @@ export function ConnectionsView() {
                 {feedback.text}
               </div>
             ) : null}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Database className="h-4 w-4 text-info" />
+              Descubrimiento y carga inicial
+            </CardTitle>
+            <CardDescription>
+              Resuelve fuente DB (Docker/local fallback) y ejecuta carga completa.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                disabled={resolveSourceMutation.isPending}
+                onClick={() => resolveSourceMutation.mutate()}
+              >
+                Resolver fuente DB
+              </Button>
+              <Button
+                disabled={
+                  bootstrapMutation.isPending || bootstrapStatus?.state === "running"
+                }
+                onClick={() => bootstrapMutation.mutate()}
+              >
+                Iniciar carga inicial
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <ConnectionField
+                label="Estado"
+                value={bootstrapStatus?.state ?? "pending"}
+                icon={<Clock className="h-4 w-4" />}
+              />
+              <ConnectionField
+                label="Fuente activa"
+                value={bootstrapStatus?.source_kind ?? "—"}
+                icon={<Database className="h-4 w-4" />}
+              />
+              <ConnectionField
+                label="Tabla actual"
+                value={bootstrapStatus?.current_table ?? "—"}
+                icon={<Layers className="h-4 w-4" />}
+              />
+              <ConnectionField
+                label="Filas procesadas"
+                value={`${bootstrapStatus?.processed_rows ?? 0} / ${bootstrapStatus?.total_rows ?? 0}`}
+                icon={<ListFilter className="h-4 w-4" />}
+              />
+              <ConnectionField
+                label="Tablas completas"
+                value={`${bootstrapStatus?.completed_table ?? 0} / ${bootstrapStatus?.total_tables ?? 0}`}
+                icon={<Layers className="h-4 w-4" />}
+              />
+              <ConnectionField
+                label="Ultimo error"
+                value={bootstrapStatus?.last_error ?? "—"}
+                icon={<Cloud className="h-4 w-4" />}
+              />
+            </div>
           </CardContent>
         </Card>
 

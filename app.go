@@ -8,19 +8,25 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"sycronizafhir/internal/config"
+	"sycronizafhir/internal/db"
 	"sycronizafhir/internal/monitor"
+	"sycronizafhir/internal/supabase"
+	syncworker "sycronizafhir/internal/sync"
 )
 
 type App struct {
-	ctx     context.Context
-	runtime *monitor.Runtime
-	cfg     *config.Config
+	ctx            context.Context
+	runtime        *monitor.Runtime
+	cfg            *config.Config
+	bootstrapMu    sync.Mutex
+	bootstrapState syncworker.BootstrapStatus
 }
 
 type ConfigSummary struct {
@@ -50,6 +56,13 @@ type LocalConnectionResult struct {
 	Message string   `json:"message"`
 	DSN     string   `json:"dsn,omitempty"`
 	DBs     []string `json:"dbs,omitempty"`
+}
+
+type DatabaseSourceResult struct {
+	Success    bool                 `json:"success"`
+	Message    string               `json:"message"`
+	Selected   *db.SourceCandidate  `json:"selected,omitempty"`
+	Candidates []db.SourceCandidate `json:"candidates,omitempty"`
 }
 
 func NewApp(rt *monitor.Runtime, cfg *config.Config) *App {
@@ -123,7 +136,7 @@ func (a *App) GetLocalConnectionDraft() LocalConnectionInput {
 			Host:     "127.0.0.1",
 			Port:     5432,
 			User:     "postgres",
-			Database: "postgres",
+			Database: "mascotas",
 			SSLMode:  "disable",
 		}
 	}
@@ -240,6 +253,129 @@ func (a *App) SaveLocalConnection(input LocalConnectionInput) LocalConnectionRes
 	}
 }
 
+func (a *App) ResolveDatabaseSource() DatabaseSourceResult {
+	if a.cfg == nil {
+		return DatabaseSourceResult{Success: false, Message: "config no cargada"}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	resolution, err := db.ResolveLocalPostgresSource(ctx, *a.cfg)
+	if err != nil {
+		return DatabaseSourceResult{
+			Success:    false,
+			Message:    err.Error(),
+			Candidates: resolution.Candidates,
+		}
+	}
+
+	a.runtime.SetMeta("local_db_source", resolution.Selected.Kind)
+	a.runtime.SetMeta("local_db", summarizePostgresURL(resolution.Selected.DSN))
+	return DatabaseSourceResult{
+		Success:    true,
+		Message:    "fuente local resuelta",
+		Selected:   &resolution.Selected,
+		Candidates: resolution.Candidates,
+	}
+}
+
+func (a *App) StartInitialFullLoad() DatabaseSourceResult {
+	if a.cfg == nil {
+		return DatabaseSourceResult{Success: false, Message: "config no cargada"}
+	}
+	if a.ctx == nil {
+		return DatabaseSourceResult{Success: false, Message: "contexto no disponible"}
+	}
+
+	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
+	resolution, err := db.ResolveLocalPostgresSource(ctx, *a.cfg)
+	cancel()
+	if err != nil {
+		return DatabaseSourceResult{
+			Success:    false,
+			Message:    err.Error(),
+			Candidates: resolution.Candidates,
+		}
+	}
+
+	a.bootstrapMu.Lock()
+	if a.bootstrapState.State == "running" {
+		a.bootstrapMu.Unlock()
+		return DatabaseSourceResult{Success: false, Message: "bootstrap ya en curso", Selected: &resolution.Selected}
+	}
+	a.bootstrapState = syncworker.BootstrapStatus{
+		State:      "running",
+		SourceKind: resolution.Selected.Kind,
+		StartedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	}
+	a.bootstrapMu.Unlock()
+
+	go a.runBootstrap(resolution.Selected)
+	return DatabaseSourceResult{
+		Success:    true,
+		Message:    "carga inicial iniciada",
+		Selected:   &resolution.Selected,
+		Candidates: resolution.Candidates,
+	}
+}
+
+func (a *App) GetInitialLoadStatus() syncworker.BootstrapStatus {
+	a.bootstrapMu.Lock()
+	defer a.bootstrapMu.Unlock()
+	return a.bootstrapState
+}
+
+func (a *App) runBootstrap(selected db.SourceCandidate) {
+	if a.cfg == nil {
+		return
+	}
+
+	ctx := context.Background()
+	localPG, err := db.NewLocalPG(ctx, selected.DSN)
+	if err != nil {
+		a.setBootstrapFailed(fmt.Sprintf("conexion fuente bootstrap: %v", err))
+		return
+	}
+	defer localPG.Close()
+
+	queueDB, err := db.NewSQLiteQueue(a.cfg.SQLitePath)
+	if err != nil {
+		a.setBootstrapFailed(fmt.Sprintf("sqlite bootstrap: %v", err))
+		return
+	}
+	defer queueDB.Close()
+
+	supabasePG, err := supabase.NewPGClient(ctx, a.cfg.SupabaseDBDSN())
+	if err != nil {
+		a.setBootstrapFailed(fmt.Sprintf("supabase bootstrap: %v", err))
+		return
+	}
+	defer supabasePG.Close()
+
+	worker := syncworker.NewBootstrapWorker(localPG, queueDB, supabasePG, a.cfg.SourceSchema, a.cfg.ExcludeTables, a.runtime)
+	status, runErr := worker.RunFullLoad(ctx, selected.Kind)
+
+	a.bootstrapMu.Lock()
+	a.bootstrapState = status
+	a.bootstrapMu.Unlock()
+
+	if runErr != nil {
+		a.runtime.AddLog("bootstrap full load fallo: " + runErr.Error())
+		return
+	}
+	a.runtime.AddLog("bootstrap full load completado")
+}
+
+func (a *App) setBootstrapFailed(message string) {
+	a.bootstrapMu.Lock()
+	defer a.bootstrapMu.Unlock()
+	a.bootstrapState.State = "failed"
+	a.bootstrapState.LastError = message
+	a.bootstrapState.UpdatedAt = time.Now().UTC()
+	a.runtime.SetComponentStatus("bootstrap", "error", message)
+}
+
 func summarizePostgresURL(rawURL string) string {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
@@ -286,7 +422,7 @@ func parseLocalDSN(raw string) LocalConnectionInput {
 			Host:     "127.0.0.1",
 			Port:     5432,
 			User:     "postgres",
-			Database: "postgres",
+			Database: "mascotas",
 			SSLMode:  "disable",
 		}
 	}

@@ -8,6 +8,7 @@ import {
   Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import packageJson from "../../../package.json";
 
 const NAV = [
   { to: "/", label: "Panel", icon: LayoutDashboard },
@@ -54,7 +55,9 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t border-border/60 p-4 text-[11px] leading-relaxed text-muted-foreground">
-        <p>v1.0.0 — Wails + WebView2</p>
+        <p>
+          v{packageJson.version} — Wails + WebView2
+        </p>
         <p className="text-foreground/70">Agencia TA, Soluciones Empresariales</p>
       </div>
     </aside>

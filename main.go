@@ -170,6 +170,13 @@ func runWithWindow() {
 }
 
 func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Config) error {
+	resolution, resolveErr := db.ResolveLocalPostgresSource(ctx, *cfg)
+	if resolveErr != nil {
+		rt.SetComponentStatus("local_postgres", "error", resolveErr.Error())
+		return fmt.Errorf("resolve local postgres source: %w", resolveErr)
+	}
+	cfg.LocalPostgresURL = resolution.Selected.DSN
+	rt.SetMeta("local_db_source", resolution.Selected.Kind)
 	rt.SetMeta("local_db", summarizePostgresURL(cfg.LocalPostgresURL))
 	rt.SetMeta("remote_db", summarizePostgresURL(cfg.SupabaseDBDSN()))
 	rt.SetMeta("source_schema", cfg.SourceSchema)

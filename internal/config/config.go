@@ -13,6 +13,8 @@ import (
 
 type Config struct {
 	LocalPostgresURL    string
+	DBSourceMode        string
+	DBSourcePriority    []string
 	SQLitePath          string
 	SupabaseURL         string
 	SupabaseServiceRole string
@@ -43,6 +45,8 @@ func Load() (Config, error) {
 
 	cfg := Config{
 		LocalPostgresURL:    os.Getenv("LOCAL_POSTGRES_URL"),
+		DBSourceMode:        readStringWithDefault("DB_SOURCE_MODE", "manual"),
+		DBSourcePriority:    readCSVWithDefault("DB_SOURCE_PRIORITY", []string{"docker", "local"}),
 		SQLitePath:          readStringWithDefault("SQLITE_QUEUE_PATH", "./sync_queue.db"),
 		SupabaseURL:         os.Getenv("SUPABASE_URL"),
 		SupabaseServiceRole: os.Getenv("SUPABASE_SERVICE_ROLE_KEY"),
@@ -66,7 +70,10 @@ func Load() (Config, error) {
 		cfg.LocalPostgresURL = override.LocalPostgresURL
 	}
 
-	if cfg.LocalPostgresURL == "" {
+	cfg.DBSourceMode = normalizeSourceMode(cfg.DBSourceMode)
+	cfg.DBSourcePriority = normalizeSourcePriority(cfg.DBSourcePriority)
+
+	if cfg.LocalPostgresURL == "" && cfg.DBSourceMode != "auto-fallback" {
 		return Config{}, errors.New("LOCAL_POSTGRES_URL is required")
 	}
 
@@ -87,6 +94,47 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func normalizeSourceMode(value string) string {
+	mode := strings.TrimSpace(strings.ToLower(value))
+	switch mode {
+	case "auto-fallback":
+		return "auto-fallback"
+	default:
+		return "manual"
+	}
+}
+
+func normalizeSourcePriority(values []string) []string {
+	if len(values) == 0 {
+		return []string{"docker", "local"}
+	}
+
+	seen := map[string]bool{}
+	normalized := make([]string, 0, len(values))
+	for _, item := range values {
+		candidate := strings.TrimSpace(strings.ToLower(item))
+		if candidate != "docker" && candidate != "local" {
+			continue
+		}
+		if seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		normalized = append(normalized, candidate)
+	}
+
+	if len(normalized) == 0 {
+		return []string{"docker", "local"}
+	}
+	if len(normalized) == 1 {
+		if normalized[0] == "docker" {
+			return []string{"docker", "local"}
+		}
+		return []string{"local", "docker"}
+	}
+	return normalized
 }
 
 func (c Config) SupabaseDBDSN() string {
@@ -121,6 +169,14 @@ func readCSV(key string) []string {
 		values = append(values, item)
 	}
 
+	return values
+}
+
+func readCSVWithDefault(key string, fallback []string) []string {
+	values := readCSV(key)
+	if len(values) == 0 {
+		return append([]string{}, fallback...)
+	}
 	return values
 }
 

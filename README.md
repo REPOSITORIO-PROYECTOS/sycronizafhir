@@ -4,6 +4,8 @@ Sync middleware bidireccional entre PostgreSQL local (legacy) y Supabase, con
 Control Center desktop embebido en Wails (sin browser y sin puertos HTTP
 locales).
 
+Versión actual del producto: archivo [`VERSION`](VERSION). Historial de releases: [`CHANGELOG.md`](CHANGELOG.md).
+
 ## Estructura
 
 - `main.go`: arranque y ciclo de vida de la app Wails + workers.

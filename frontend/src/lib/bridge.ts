@@ -1,5 +1,7 @@
 import type {
+  BootstrapStatus,
   ConfigSummary,
+  DatabaseSourceResult,
   LocalConnectionInput,
   LocalConnectionResult,
   ScanResult,
@@ -22,6 +24,9 @@ interface AppBindings {
   SaveLocalConnection: (
     input: LocalConnectionInput
   ) => Promise<LocalConnectionResult>;
+  ResolveDatabaseSource: () => Promise<DatabaseSourceResult>;
+  StartInitialFullLoad: () => Promise<DatabaseSourceResult>;
+  GetInitialLoadStatus: () => Promise<BootstrapStatus>;
 }
 
 interface WailsRuntime {
@@ -80,7 +85,7 @@ const mockSnapshot: Snapshot = {
   meta: {
     app_name: "sycronizafhir",
     mode: "window",
-    local_db: "user@localhost:5432/legacy",
+    local_db: "user@localhost:5432/mascotas",
     remote_db: "user@db.supabase.co:5432/postgres",
     source_schema: "public",
     outbound_every: "60s",
@@ -94,7 +99,7 @@ const mockSnapshot: Snapshot = {
 
 const mockConfig: ConfigSummary = {
   app_name: "sycronizafhir",
-  local_db: "user@localhost:5432/legacy",
+  local_db: "user@localhost:5432/mascotas",
   remote_db: "user@db.supabase.co:5432/postgres",
   source_schema: "public",
   exclude_tables: ["sync_buzon_pedidos"],
@@ -110,7 +115,7 @@ const mockLocalDraft: LocalConnectionInput = {
   port: 5432,
   user: "postgres",
   password: "",
-  database: "postgres",
+  database: "mascotas",
   ssl_mode: "disable",
 };
 
@@ -123,6 +128,34 @@ const mockScan: ScanResult = {
     sync_tables_detected: "12",
   },
   changes: [],
+};
+
+const mockSourceResult: DatabaseSourceResult = {
+  success: true,
+  message: "fuente mock resuelta",
+  selected: {
+    kind: "local",
+    dsn: "postgres://postgres:***@127.0.0.1:5432/mascotas?sslmode=disable",
+    reason: "mock",
+  },
+  candidates: [
+    { kind: "docker", reason: "docker no disponible (mock)" },
+    {
+      kind: "local",
+      dsn: "postgres://postgres:***@127.0.0.1:5432/mascotas?sslmode=disable",
+      reason: "fallback local mock",
+    },
+  ],
+};
+
+const mockBootstrapStatus: BootstrapStatus = {
+  state: "pending",
+  processed_rows: 0,
+  total_rows: 0,
+  last_offset: 0,
+  chunk_size: 200,
+  completed_table: 0,
+  total_tables: 0,
 };
 
 export const bridge = {
@@ -201,6 +234,27 @@ export const bridge = {
       message: "Configuracion mock guardada",
       dsn: `postgres://${input.user}:***@${input.host}:${input.port}/${input.database}?sslmode=${input.ssl_mode}`,
     };
+  },
+  async resolveDatabaseSource(): Promise<DatabaseSourceResult> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.ResolveDatabaseSource();
+    }
+    return mockSourceResult;
+  },
+  async startInitialFullLoad(): Promise<DatabaseSourceResult> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.StartInitialFullLoad();
+    }
+    return {
+      ...mockSourceResult,
+      message: "carga inicial mock iniciada",
+    };
+  },
+  async getInitialLoadStatus(): Promise<BootstrapStatus> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.GetInitialLoadStatus();
+    }
+    return mockBootstrapStatus;
   },
   on(event: string, handler: (payload: unknown) => void): () => void {
     if (!isWailsAvailable()) {
