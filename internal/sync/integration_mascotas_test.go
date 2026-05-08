@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 
@@ -332,10 +333,333 @@ func TestOutboundMockRowLocalToSupabase(t *testing.T) {
 	}
 }
 
+func TestOutboundMockClientesPedidosUpsert(t *testing.T) {
+	localDSN := localMascotasDSN(t)
+	if localDSN == "" {
+		t.Skip("MASCOTAS_TEST_DSN o LOCAL_POSTGRES_URL (BD local)")
+	}
+	remoteDSN := remoteSupabaseDSN(t)
+	if remoteDSN == "" {
+		t.Skip("mismas vars Supabase que en internal/supabase/integration_test.go")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	const schema = "public"
+
+	localPool, err := pgxpool.New(ctx, localDSN)
+	if err != nil {
+		t.Fatalf("local pool: %v", err)
+	}
+	defer localPool.Close()
+
+	remoteCfg, err := supabase.PoolConfigFromDSN(remoteDSN)
+	if err != nil {
+		t.Fatalf("remote pool config: %v", err)
+	}
+	remotePool, err := pgxpool.NewWithConfig(ctx, remoteCfg)
+	if err != nil {
+		t.Fatalf("remote pool: %v", err)
+	}
+	defer remotePool.Close()
+
+	localPG, err := db.NewLocalPG(ctx, localDSN)
+	if err != nil {
+		t.Fatalf("local postgres: %v", err)
+	}
+	defer localPG.Close()
+
+	remote, err := supabase.NewPGClient(ctx, remoteDSN)
+	if err != nil {
+		t.Fatalf("supabase: %v", err)
+	}
+	defer remote.Close()
+
+	tables := []string{"clientes", "pedidos"}
+	for _, table := range tables {
+		ok, err := tableExists(ctx, localPool, schema, table)
+		if err != nil {
+			t.Fatalf("check local table %s: %v", table, err)
+		}
+		if !ok {
+			t.Skipf("tabla local %s no existe en %s", table, schema)
+		}
+
+		localPK, err := readPrimaryKeys(ctx, localPool, schema, table)
+		if err != nil {
+			t.Fatalf("read local pk %s: %v", table, err)
+		}
+		if len(localPK) != 1 {
+			t.Skipf("tabla local %s tiene PK compuesta o sin PK (%v); este test requiere 1 columna", table, localPK)
+		}
+		pk := localPK[0]
+
+		localColumns, err := readColumnsDetailed(ctx, localPool, schema, table)
+		if err != nil {
+			t.Fatalf("read local columns %s: %v", table, err)
+		}
+
+		mockRow := buildMockInsertRow(localColumns, pk, fmt.Sprintf("mock-%s-%d", table, time.Now().UnixNano()))
+		if _, ok := mockRow["fecha_modificacion"]; ok {
+			mockRow["fecha_modificacion"] = time.Now().UTC()
+		}
+
+		pkValue := mockRow[pk]
+		inserted, err := insertRow(ctx, localPool, schema, table, mockRow, pk)
+		if err != nil {
+			t.Fatalf("insert local mock %s: %v", table, err)
+		}
+		if !inserted {
+			t.Fatalf("no se pudo insertar mock en local %s", table)
+		}
+
+		t.Cleanup(func() {
+			cctx, ccancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer ccancel()
+			_, _ = localPool.Exec(cctx, fmt.Sprintf(`DELETE FROM %s.%s WHERE %s = $1`, schema, table, pk), pkValue)
+			if id, ok := mockRow["id"]; ok && id != nil {
+				_, _ = remotePool.Exec(cctx, fmt.Sprintf(`DELETE FROM %s.%s WHERE id = $1`, schema, table), id)
+			}
+		})
+
+		since := time.Now().Add(-5 * time.Minute)
+		rows, err := localPG.LoadUpdatedRows(ctx, schema, table, since)
+		if err != nil {
+			t.Fatalf("LoadUpdatedRows local %s: %v", table, err)
+		}
+
+		found := findRowByKey(rows, pk, pkValue)
+		if found == nil {
+			t.Fatalf("no se encontró la fila mock en local %s (pk=%s)", table, pk)
+		}
+
+		payload := []map[string]interface{}{found}
+		if err = remote.UpsertRows(ctx, schema, table, payload, []string{pk}); err != nil {
+			t.Fatalf("UpsertRows %s: %v", table, err)
+		}
+		if found["id"] == nil {
+			t.Fatalf("upsert %s: no quedó id seteado para poder verificar", table)
+		}
+
+		var one int
+		err = remotePool.QueryRow(ctx, fmt.Sprintf(`SELECT 1 FROM %s.%s WHERE id = $1`, schema, table), found["id"]).Scan(&one)
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				t.Fatalf("no existe en Supabase %s id=%v luego del upsert", table, found["id"])
+			}
+			t.Fatalf("verificar supabase %s: %v", table, err)
+		}
+	}
+}
+
 func syncTableNames(tables []db.SyncTable) []string {
 	names := make([]string, 0, len(tables))
 	for _, table := range tables {
 		names = append(names, table.Name)
 	}
 	return names
+}
+
+type columnDetail struct {
+	Name       string
+	DataType   string
+	IsNullable string
+	IsIdentity string
+	Default    *string
+	MaxLen     *int32
+}
+
+func tableExists(ctx context.Context, pool *pgxpool.Pool, schema, table string) (bool, error) {
+	var one int
+	err := pool.QueryRow(ctx, `
+		SELECT 1
+		FROM information_schema.tables
+		WHERE table_schema = $1 AND table_name = $2`, schema, table).Scan(&one)
+	if err == pgx.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func readColumnsDetailed(ctx context.Context, pool *pgxpool.Pool, schema, table string) ([]columnDetail, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT column_name, data_type, is_nullable, is_identity, column_default, character_maximum_length
+		FROM information_schema.columns
+		WHERE table_schema = $1 AND table_name = $2
+		ORDER BY ordinal_position`, schema, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols := make([]columnDetail, 0)
+	for rows.Next() {
+		var c columnDetail
+		if err = rows.Scan(&c.Name, &c.DataType, &c.IsNullable, &c.IsIdentity, &c.Default, &c.MaxLen); err != nil {
+			return nil, err
+		}
+		cols = append(cols, c)
+	}
+	return cols, rows.Err()
+}
+
+func readPrimaryKeys(ctx context.Context, pool *pgxpool.Pool, schema, table string) ([]string, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT kcu.column_name
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+			ON tc.constraint_name = kcu.constraint_name
+		   AND tc.table_schema = kcu.table_schema
+		   AND tc.table_name = kcu.table_name
+		WHERE tc.constraint_type = 'PRIMARY KEY'
+		  AND tc.table_schema = $1
+		  AND tc.table_name = $2
+		ORDER BY kcu.ordinal_position`, schema, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	keys := make([]string, 0)
+	for rows.Next() {
+		var name string
+		if err = rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		keys = append(keys, name)
+	}
+	return keys, rows.Err()
+}
+
+func buildMockInsertRow(cols []columnDetail, pk string, seed string) map[string]interface{} {
+	row := map[string]interface{}{}
+	for _, c := range cols {
+		if c.IsIdentity == "YES" {
+			continue
+		}
+		if c.Default != nil {
+			continue
+		}
+		if c.IsNullable != "NO" {
+			continue
+		}
+		row[c.Name] = mockValueForLocal(c.Name, c.DataType, c.MaxLen, seed)
+	}
+	if _, ok := row[pk]; !ok {
+		var pkType string
+		var pkMaxLen *int32
+		for _, c := range cols {
+			if c.Name == pk {
+				pkType = c.DataType
+				pkMaxLen = c.MaxLen
+				break
+			}
+		}
+		row[pk] = mockValueForLocal(pk, pkType, pkMaxLen, seed)
+	}
+
+	for _, c := range cols {
+		if c.Name == "fecha_modificacion" {
+			row["fecha_modificacion"] = time.Now().UTC()
+			break
+		}
+	}
+
+	return row
+}
+
+func mockValueForLocal(name, dataType string, maxLen *int32, seed string) interface{} {
+	n := strings.ToLower(name)
+	t := strings.ToLower(dataType)
+
+	if strings.Contains(t, "smallint") {
+		return int16(time.Now().UnixNano() % 30000)
+	}
+	if strings.Contains(t, "bigint") {
+		return int64(time.Now().UnixNano() % 1000000000)
+	}
+	if strings.Contains(t, "integer") {
+		return int32(time.Now().UnixNano() % 1000000000)
+	}
+	if strings.Contains(t, "double") || strings.Contains(t, "numeric") || strings.Contains(t, "real") || strings.Contains(t, "decimal") {
+		return 1
+	}
+	if strings.Contains(t, "boolean") {
+		return false
+	}
+	if strings.Contains(t, "timestamp") || strings.Contains(t, "date") {
+		return time.Now().UTC()
+	}
+	if strings.Contains(n, "nombre") {
+		return truncateString("mock", maxLen)
+	}
+	if strings.Contains(n, "email") {
+		return truncateString("mock@example.com", maxLen)
+	}
+	if strings.Contains(n, "estado") {
+		return truncateString("mock", maxLen)
+	}
+	if strings.Contains(n, "tipo") {
+		return truncateString("mock", maxLen)
+	}
+	if strings.Contains(n, "numero") {
+		raw := fmt.Sprintf("%d", time.Now().UnixNano())
+		return truncateString(raw, maxLen)
+	}
+	if n == "id" {
+		return truncateString(seed, maxLen)
+	}
+	return truncateString(seed, maxLen)
+}
+
+func truncateString(value string, maxLen *int32) string {
+	if maxLen == nil || *maxLen <= 0 {
+		return value
+	}
+	n := int(*maxLen)
+	if len(value) <= n {
+		return value
+	}
+	return value[:n]
+}
+
+func insertRow(ctx context.Context, pool *pgxpool.Pool, schema, table string, row map[string]interface{}, pk string) (bool, error) {
+	cols := make([]string, 0, len(row))
+	vals := make([]interface{}, 0, len(row))
+	i := 1
+	placeholders := make([]string, 0, len(row))
+	for k, v := range row {
+		cols = append(cols, k)
+		vals = append(vals, v)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", i))
+		i++
+	}
+
+	setParts := make([]string, 0, len(cols))
+	for _, col := range cols {
+		if col == pk {
+			continue
+		}
+		setParts = append(setParts, fmt.Sprintf("%s = EXCLUDED.%s", col, col))
+	}
+	setClause := "DO NOTHING"
+	if len(setParts) > 0 {
+		setClause = "DO UPDATE SET " + strings.Join(setParts, ", ")
+	}
+
+	query := fmt.Sprintf(`INSERT INTO %s.%s (%s) VALUES (%s) ON CONFLICT (%s) %s`,
+		schema, table, strings.Join(cols, ", "), strings.Join(placeholders, ", "), pk, setClause)
+	_, err := pool.Exec(ctx, query, vals...)
+	return err == nil, err
+}
+
+func findRowByKey(rows []map[string]interface{}, key string, value interface{}) map[string]interface{} {
+	want := fmt.Sprint(value)
+	for _, row := range rows {
+		if fmt.Sprint(row[key]) == want {
+			return row
+		}
+	}
+	return nil
 }

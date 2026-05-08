@@ -3,7 +3,6 @@ package supabase
 import (
 	"context"
 	"fmt"
-	"os"
 	"regexp"
 	"sort"
 	"slices"
@@ -103,8 +102,7 @@ func (c *PGClient) UpsertRows(ctx context.Context, schemaName, tableName string,
 	if err != nil {
 		return err
 	}
-	fillMissingRequired := strings.EqualFold(strings.TrimSpace(os.Getenv("SYNC_FILL_MISSING_REQUIRED")), "1") ||
-		strings.EqualFold(strings.TrimSpace(os.Getenv("SYNC_FILL_MISSING_REQUIRED")), "true")
+	fillMissingRequired := true
 
 	filteredConflicts := filterAllowedColumns(conflictColumns, allowedColumns)
 	if len(filteredConflicts) == 0 {
