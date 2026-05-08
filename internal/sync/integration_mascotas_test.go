@@ -224,6 +224,114 @@ func TestMascotasChunkUpsertToSupabase(t *testing.T) {
 	t.Logf("OK: %d filas desde local.%s -> supabase public.%s (PK %v)", len(rows), target.Name, target.Name, target.PrimaryKeys)
 }
 
+func TestOutboundMockRowLocalToSupabase(t *testing.T) {
+	localDSN := localMascotasDSN(t)
+	if localDSN == "" {
+		t.Skip("MASCOTAS_TEST_DSN o LOCAL_POSTGRES_URL (BD local)")
+	}
+	remoteDSN := remoteSupabaseDSN(t)
+	if remoteDSN == "" {
+		t.Skip("mismas vars Supabase que en internal/supabase/integration_test.go")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	const schema = "public"
+	const table = "sync_bridge_outbound_mock"
+	const id int64 = 918273646
+	label := fmt.Sprintf("mock-local-%d", time.Now().UnixNano())
+
+	localPool, err := pgxpool.New(ctx, localDSN)
+	if err != nil {
+		t.Fatalf("local pool: %v", err)
+	}
+	defer localPool.Close()
+
+	remoteCfg, err := supabase.PoolConfigFromDSN(remoteDSN)
+	if err != nil {
+		t.Fatalf("remote pool config: %v", err)
+	}
+	remotePool, err := pgxpool.NewWithConfig(ctx, remoteCfg)
+	if err != nil {
+		t.Fatalf("remote pool: %v", err)
+	}
+	defer remotePool.Close()
+
+	_, err = localPool.Exec(ctx, fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s.%s (
+			id bigint PRIMARY KEY,
+			label text NOT NULL,
+			fecha_modificacion timestamptz NOT NULL
+		)`, schema, table))
+	if err != nil {
+		t.Fatalf("create local table: %v", err)
+	}
+	_, err = remotePool.Exec(ctx, fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s.%s (
+			id bigint PRIMARY KEY,
+			label text NOT NULL,
+			fecha_modificacion timestamptz NOT NULL
+		)`, schema, table))
+	if err != nil {
+		t.Fatalf("create remote table: %v", err)
+	}
+
+	t.Cleanup(func() {
+		cctx, ccancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer ccancel()
+		_, _ = localPool.Exec(cctx, fmt.Sprintf("DELETE FROM %s.%s WHERE id = $1", schema, table), id)
+		_, _ = remotePool.Exec(cctx, fmt.Sprintf("DELETE FROM %s.%s WHERE id = $1", schema, table), id)
+	})
+
+	_, err = localPool.Exec(ctx,
+		fmt.Sprintf(`
+			INSERT INTO %s.%s (id, label, fecha_modificacion)
+			VALUES ($1, $2, NOW())
+			ON CONFLICT (id) DO UPDATE SET
+				label = EXCLUDED.label,
+				fecha_modificacion = EXCLUDED.fecha_modificacion`, schema, table),
+		id, label,
+	)
+	if err != nil {
+		t.Fatalf("insert local mock row: %v", err)
+	}
+
+	localPG, err := db.NewLocalPG(ctx, localDSN)
+	if err != nil {
+		t.Fatalf("local postgres: %v", err)
+	}
+	defer localPG.Close()
+
+	since := time.Now().Add(-2 * time.Minute)
+	rows, err := localPG.LoadUpdatedRows(ctx, schema, table, since)
+	if err != nil {
+		t.Fatalf("LoadUpdatedRows: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatalf("no se leyó ninguna fila desde local.%s.%s (since=%s)", schema, table, since.Format(time.RFC3339Nano))
+	}
+
+	remote, err := supabase.NewPGClient(ctx, remoteDSN)
+	if err != nil {
+		t.Fatalf("supabase: %v", err)
+	}
+	defer remote.Close()
+
+	if err = remote.UpsertRows(ctx, schema, table, rows, []string{"id"}); err != nil {
+		t.Fatalf("UpsertRows: %v", err)
+	}
+
+	var got string
+	err = remotePool.QueryRow(ctx, fmt.Sprintf("SELECT label FROM %s.%s WHERE id = $1", schema, table), id).Scan(&got)
+	if err != nil {
+		t.Fatalf("select remote after upsert: %v", err)
+	}
+	if got != label {
+		t.Fatalf("label mismatch: got %q want %q", got, label)
+	}
+}
+
 func syncTableNames(tables []db.SyncTable) []string {
 	names := make([]string, 0, len(tables))
 	for _, table := range tables {
