@@ -27,6 +27,8 @@ type Config struct {
 	SupabaseDBSSLMode   string
 	SupabaseDBURL       string
 	OutboundInterval    time.Duration
+	DeviceID            string
+	DevicePresenceEvery time.Duration
 	RealtimeChannel     string
 	RealtimeSchema      string
 	RealtimeTable       string
@@ -39,6 +41,11 @@ func Load() (Config, error) {
 	applyEmbeddedDefaults()
 
 	intervalSeconds, err := readIntWithDefault("OUTBOUND_INTERVAL_SECONDS", 60)
+	if err != nil {
+		return Config{}, err
+	}
+
+	presenceSeconds, err := readIntWithDefault("DEVICE_PRESENCE_INTERVAL_SECONDS", 60)
 	if err != nil {
 		return Config{}, err
 	}
@@ -59,6 +66,8 @@ func Load() (Config, error) {
 		SupabaseDBSSLMode:   readStringWithDefault("SUPABASE_DB_SSLMODE", "require"),
 		SupabaseDBURL:       os.Getenv("SUPABASE_DB_URL"),
 		OutboundInterval:    time.Duration(intervalSeconds) * time.Second,
+		DeviceID:            strings.TrimSpace(os.Getenv("DEVICE_ID")),
+		DevicePresenceEvery: time.Duration(presenceSeconds) * time.Second,
 		RealtimeChannel:     readStringWithDefault("SUPABASE_REALTIME_CHANNEL", "realtime:public:pedidos"),
 		RealtimeSchema:      readStringWithDefault("SUPABASE_REALTIME_SCHEMA", "public"),
 		RealtimeTable:       readStringWithDefault("SUPABASE_REALTIME_TABLE", "pedidos"),

@@ -95,13 +95,14 @@ func discoverDockerPostgresDSN(ctx context.Context, fallbackDSN string) (string,
 		parsedBase.RawQuery = queryValues.Encode()
 	}
 
+	desiredHostPort := strings.TrimSpace(parsedBase.Port())
 	cmd := exec.CommandContext(
 		ctx,
 		"docker",
 		"ps",
 		"--filter", "status=running",
 		"--filter", "publish=5432",
-		"--format", "{{.Ports}}",
+		"--format", "{{.Names}}\t{{.Ports}}",
 	)
 	rawOutput, err := cmd.Output()
 	if err != nil {
@@ -114,19 +115,53 @@ func discoverDockerPostgresDSN(ctx context.Context, fallbackDSN string) (string,
 	}
 
 	lines := strings.Split(output, "\n")
+	type candidate struct {
+		dsn   string
+		name  string
+		ports string
+	}
+	candidates := make([]candidate, 0)
 	for _, line := range lines {
-		dsn, parseErr := buildDSNFromDockerPorts(parsedBase, line)
+		dsn, name, ports, hostPort, parseErr := buildDSNFromDockerPortLine(parsedBase, line)
 		if parseErr != nil {
 			continue
 		}
-		return dsn, nil
+		if desiredHostPort != "" && hostPort != desiredHostPort {
+			continue
+		}
+		candidates = append(candidates, candidate{dsn: dsn, name: name, ports: ports})
+	}
+
+	if len(candidates) == 1 {
+		return candidates[0].dsn, nil
+	}
+	if len(candidates) > 1 {
+		labels := make([]string, 0, len(candidates))
+		for _, item := range candidates {
+			labels = append(labels, fmt.Sprintf("%s (%s)", item.name, item.ports))
+		}
+		return "", fmt.Errorf("varios contenedores postgres publicados: %s; especifique el puerto en LOCAL_POSTGRES_URL", strings.Join(labels, ", "))
 	}
 
 	return "", errors.New("no se pudo inferir puerto publicado de docker")
 }
 
-func buildDSNFromDockerPorts(base *url.URL, portsLine string) (string, error) {
-	parts := strings.Split(portsLine, ",")
+func buildDSNFromDockerPortLine(base *url.URL, line string) (dsn, name, ports, hostPort string, _ error) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return "", "", "", "", errors.New("linea vacia")
+	}
+	fields := strings.SplitN(trimmed, "\t", 2)
+	if len(fields) != 2 {
+		return "", "", "", "", errors.New("formato invalido")
+	}
+	name = strings.TrimSpace(fields[0])
+	ports = strings.TrimSpace(fields[1])
+	if name == "" || ports == "" {
+		return "", "", "", "", errors.New("formato incompleto")
+	}
+
+	parts := strings.Split(ports, ",")
 	for _, part := range parts {
 		segment := strings.TrimSpace(part)
 		if !strings.Contains(segment, "->5432/tcp") || !strings.Contains(segment, ":") {
@@ -145,16 +180,16 @@ func buildDSNFromDockerPorts(base *url.URL, portsLine string) (string, error) {
 		if strings.HasPrefix(host, "0.0.0.0") || strings.HasPrefix(host, "::") || host == "" {
 			host = "127.0.0.1"
 		}
-		port := strings.TrimSpace(left[lastColon+1:])
-		if port == "" {
+		hostPort = strings.TrimSpace(left[lastColon+1:])
+		if hostPort == "" {
 			continue
 		}
 
 		candidate := *base
-		candidate.Host = fmt.Sprintf("%s:%s", host, port)
-		return candidate.String(), nil
+		candidate.Host = fmt.Sprintf("%s:%s", host, hostPort)
+		return candidate.String(), name, ports, hostPort, nil
 	}
-	return "", errors.New("linea sin mapping util")
+	return "", name, ports, "", errors.New("linea sin mapping util")
 }
 
 func pingDSN(ctx context.Context, dsn string) error {

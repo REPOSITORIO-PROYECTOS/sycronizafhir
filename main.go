@@ -177,7 +177,8 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 	}
 	cfg.LocalPostgresURL = resolution.Selected.DSN
 	rt.SetMeta("local_db_source", resolution.Selected.Kind)
-	rt.SetMeta("local_db", summarizePostgresURL(cfg.LocalPostgresURL))
+	localDBSummary := summarizePostgresURL(cfg.LocalPostgresURL)
+	rt.SetMeta("local_db", localDBSummary)
 	rt.SetMeta("remote_db", summarizePostgresURL(cfg.SupabaseDBDSN()))
 	rt.SetMeta("source_schema", cfg.SourceSchema)
 	rt.SetMeta("outbound_every", cfg.OutboundInterval.String())
@@ -272,9 +273,10 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 
 	outbound := syncworker.NewOutboundWorker(localPG, queueDB, supabasePG, *cfg, rt)
 	inbound := syncworker.NewInboundWorker(localPG, queueDB, *cfg, rt)
+	presence := syncworker.NewPresenceWorker(queueDB, supabasePG, *cfg, rt, resolution.Selected.Kind, localDBSummary)
 
 	wg := &sync.WaitGroup{}
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		outbound.Run(ctx)
@@ -282,6 +284,10 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 	go func() {
 		defer wg.Done()
 		inbound.Run(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		presence.Run(ctx)
 	}()
 
 	go func() {

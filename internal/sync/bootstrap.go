@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"sycronizafhir/internal/db"
@@ -73,25 +74,80 @@ func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (B
 		return BootstrapStatus{}, err
 	}
 
-	status := BootstrapStatus{
-		State:       "running",
-		SourceKind:  sourceKind,
-		StartedAt:   time.Now().UTC(),
-		UpdatedAt:   time.Now().UTC(),
-		ChunkSize:   w.chunkSize,
-		TotalTables: len(tables),
+	now := time.Now().UTC()
+	status := BootstrapStatus{}
+	resume := false
+	if previous, loadErr := w.LoadStatus(ctx); loadErr == nil {
+		if previous.State == "failed" || previous.State == "running" {
+			status = previous
+			resume = true
+		}
 	}
-	if persistErr := w.persistStatus(ctx, status); persistErr != nil {
-		return BootstrapStatus{}, persistErr
+
+	if resume {
+		status.State = "running"
+		status.SourceKind = sourceKind
+		if status.StartedAt.IsZero() {
+			status.StartedAt = now
+		}
+		status.UpdatedAt = now
+		status.ChunkSize = w.chunkSize
+		status.TotalTables = len(tables)
+		if persistErr := w.persistStatus(ctx, status); persistErr != nil {
+			return BootstrapStatus{}, persistErr
+		}
+		w.runtime.SetComponentStatus("bootstrap", "running", "reanudando carga inicial")
+	} else {
+		status = BootstrapStatus{
+			State:       "running",
+			SourceKind:  sourceKind,
+			StartedAt:   now,
+			UpdatedAt:   now,
+			ChunkSize:   w.chunkSize,
+			TotalTables: len(tables),
+		}
+		if persistErr := w.persistStatus(ctx, status); persistErr != nil {
+			return BootstrapStatus{}, persistErr
+		}
+		w.runtime.SetComponentStatus("bootstrap", "running", "carga inicial en curso")
 	}
-	w.runtime.SetComponentStatus("bootstrap", "running", "carga inicial en curso")
+
+	startIndex := 0
+	if resume {
+		startIndex = status.CompletedTable
+		if status.CurrentTable != "" {
+			for i, table := range tables {
+				if table.Name == status.CurrentTable {
+					startIndex = i
+					break
+				}
+			}
+		}
+		if startIndex < 0 {
+			startIndex = 0
+		}
+		if startIndex > len(tables) {
+			startIndex = len(tables)
+		}
+	}
 
 	for tableIndex, table := range tables {
+		if resume && tableIndex < startIndex {
+			continue
+		}
+
+		shouldCount := true
+		if resume && tableIndex == startIndex && table.Name == status.CurrentTable {
+			shouldCount = false
+		}
+
 		tableTotal, countErr := w.localPG.CountTableRows(ctx, w.sourceSchema, table.Name)
-		if countErr != nil {
+		if countErr != nil && shouldCount {
 			return w.fail(ctx, status, fmt.Sprintf("count %s: %v", table.Name, countErr))
 		}
-		status.TotalRows += tableTotal
+		if shouldCount {
+			status.TotalRows += tableTotal
+		}
 		status.CurrentTable = table.Name
 		status.CompletedTable = tableIndex
 		if persistErr := w.persistStatus(ctx, status); persistErr != nil {
@@ -99,6 +155,9 @@ func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (B
 		}
 
 		offset := 0
+		if resume && tableIndex == startIndex && status.LastOffset > 0 {
+			offset = status.LastOffset
+		}
 		for {
 			rows, rowsErr := w.localPG.LoadTableRowsChunk(ctx, w.sourceSchema, table.Name, offset, w.chunkSize, table.PrimaryKeys)
 			if rowsErr != nil {
@@ -108,7 +167,7 @@ func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (B
 				break
 			}
 
-			if upsertErr := w.pgClient.UpsertRows(ctx, "public", table.Name, rows, table.PrimaryKeys); upsertErr != nil {
+			if upsertErr := w.upsertWithRetry(ctx, table.Name, rows, table.PrimaryKeys); upsertErr != nil {
 				return w.fail(ctx, status, fmt.Sprintf("upsert %s offset %d: %v", table.Name, offset, upsertErr))
 			}
 
@@ -136,6 +195,38 @@ func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (B
 	}
 	w.runtime.SetComponentStatus("bootstrap", "running", "carga inicial completada")
 	return status, nil
+}
+
+func (w *BootstrapWorker) upsertWithRetry(ctx context.Context, tableName string, rows []map[string]interface{}, conflictColumns []string) error {
+	var lastErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		if attempt > 0 {
+			delay := time.Duration(2<<attempt) * time.Second
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+
+		err := w.pgClient.UpsertRows(ctx, "public", tableName, rows, conflictColumns)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+
+		message := strings.ToLower(err.Error())
+		if strings.Contains(message, "wsarecv") ||
+			strings.Contains(message, "connection") ||
+			strings.Contains(message, "broken pipe") ||
+			strings.Contains(message, "reset") ||
+			strings.Contains(message, "aborted") {
+			continue
+		}
+
+		return err
+	}
+	return lastErr
 }
 
 func (w *BootstrapWorker) fail(ctx context.Context, status BootstrapStatus, message string) (BootstrapStatus, error) {
