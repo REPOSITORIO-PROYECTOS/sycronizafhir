@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -21,6 +23,12 @@ type QueueJob struct {
 }
 
 func NewSQLiteQueue(path string) (*QueueSQLite, error) {
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("create sqlite directory: %w", err)
+		}
+	}
+
 	conn, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err

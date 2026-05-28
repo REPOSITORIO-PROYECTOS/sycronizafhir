@@ -3,6 +3,13 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.4.2] - 2026-05-28
+
+### Corregido
+
+- Cola SQLite (`SQLITE_QUEUE_PATH`): rutas relativas se resuelven a `%APPDATA%\\sycronizafhir\\sync_queue.db` para evitar fallos al iniciar bootstrap en la app Wails (error SQLite 14 / "out of memory" por CWD sin permisos de escritura).
+- Se crea el directorio padre de la base SQLite antes de abrirla.
+
 ## [1.4.0] - 2026-05-07
 
 ### Añadido

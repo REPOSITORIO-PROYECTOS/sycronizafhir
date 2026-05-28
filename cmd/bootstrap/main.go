@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"sycronizafhir/internal/config"
@@ -20,7 +22,13 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	timeoutMinutes := 360
+	if raw := strings.TrimSpace(os.Getenv("BOOTSTRAP_TIMEOUT_MINUTES")); raw != "" {
+		if parsed, parseErr := strconv.Atoi(raw); parseErr == nil && parsed > 0 {
+			timeoutMinutes = parsed
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMinutes)*time.Minute)
 	defer cancel()
 
 	resolution, err := db.ResolveLocalPostgresSource(ctx, cfg)
@@ -49,11 +57,39 @@ func main() {
 
 	rt := monitor.NewRuntime()
 	worker := syncworker.NewBootstrapWorker(localPG, queueDB, supabasePG, cfg.SourceSchema, cfg.ExcludeTables, rt)
-	status, err := worker.RunFullLoad(ctx, resolution.Selected.Kind)
-	if err != nil {
-		log.Printf("bootstrap failed: %v", err)
-		os.Exit(1)
+	type result struct {
+		status syncworker.BootstrapStatus
+		err    error
 	}
+	done := make(chan result, 1)
 
-	fmt.Printf("bootstrap completed: %d/%d rows, %d/%d tables\n", status.ProcessedRows, status.TotalRows, status.CompletedTable, status.TotalTables)
+	go func() {
+		status, err := worker.RunFullLoad(ctx, resolution.Selected.Kind)
+		done <- result{status: status, err: err}
+	}()
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			status, loadErr := worker.LoadStatus(ctx)
+			if loadErr != nil {
+				log.Printf("bootstrap status read failed: %v", loadErr)
+				continue
+			}
+			log.Printf("bootstrap: state=%s table=%s rows=%d/%d tables=%d/%d offset=%d", status.State, status.CurrentTable, status.ProcessedRows, status.TotalRows, status.CompletedTable, status.TotalTables, status.LastOffset)
+		case res := <-done:
+			if res.err != nil {
+				log.Printf("bootstrap failed: %v", res.err)
+				os.Exit(1)
+			}
+			fmt.Printf("bootstrap completed: %d/%d rows, %d/%d tables\n", res.status.ProcessedRows, res.status.TotalRows, res.status.CompletedTable, res.status.TotalTables)
+			return
+		case <-ctx.Done():
+			log.Printf("bootstrap timeout/cancel: %v", ctx.Err())
+			os.Exit(1)
+		}
+	}
 }

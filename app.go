@@ -361,6 +361,10 @@ func (a *App) runBootstrap(selected db.SourceCandidate) {
 	a.bootstrapMu.Unlock()
 
 	if runErr != nil {
+		if strings.TrimSpace(status.LastError) == "" {
+			a.setBootstrapFailed(runErr.Error())
+			return
+		}
 		a.runtime.AddLog("bootstrap full load fallo: " + runErr.Error())
 		return
 	}

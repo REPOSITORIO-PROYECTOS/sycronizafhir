@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { bridge } from "@/lib/bridge";
 import type { LocalConnectionInput } from "@/types/domain";
+import type { DatabaseSourceResult } from "@/types/domain";
 import type { ReactNode } from "react";
 
 interface ConnectionFieldProps {
@@ -84,6 +85,9 @@ export function ConnectionsView() {
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(
     null
   );
+  const [lastSourceResult, setLastSourceResult] = useState<DatabaseSourceResult | null>(
+    null
+  );
 
   useEffect(() => {
     if (!draft) return;
@@ -129,14 +133,17 @@ export function ConnectionsView() {
 
   const resolveSourceMutation = useMutation({
     mutationFn: () => bridge.resolveDatabaseSource(),
-    onSuccess: (result) =>
-      setFeedback({ ok: result.success, text: result.message }),
+    onSuccess: (result) => {
+      setLastSourceResult(result);
+      setFeedback({ ok: result.success, text: result.message });
+    },
     onError: (error: Error) => setFeedback({ ok: false, text: error.message }),
   });
 
   const bootstrapMutation = useMutation({
     mutationFn: () => bridge.startInitialFullLoad(),
     onSuccess: async (result) => {
+      setLastSourceResult(result);
       setFeedback({ ok: result.success, text: result.message });
       await queryClient.invalidateQueries({ queryKey: ["bootstrap-status"] });
     },
@@ -357,6 +364,39 @@ export function ConnectionsView() {
                 Iniciar carga inicial
               </Button>
             </div>
+
+            {lastSourceResult?.candidates && lastSourceResult.candidates.length > 0 ? (
+              <div className="rounded-lg border border-border/40 bg-background/60 p-3">
+                <p className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">
+                  Diagnóstico fuente DB
+                </p>
+                <div className="space-y-2">
+                  {lastSourceResult.candidates.map((c) => {
+                    const selected = lastSourceResult.selected?.kind === c.kind;
+                    return (
+                      <div
+                        key={`${c.kind}-${c.reason}`}
+                        className={`rounded-md border px-3 py-2 text-sm ${
+                          selected
+                            ? "border-success/40 bg-success/10 text-success"
+                            : "border-border/40 bg-background/40 text-foreground"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono">{c.kind}</span>
+                          {selected ? (
+                            <Badge variant="muted" className="font-normal">
+                              seleccionada
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <div className="mt-1 text-muted-foreground">{c.reason || "—"}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <ConnectionField

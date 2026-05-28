@@ -50,11 +50,16 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	sqlitePath, err := ResolveSQLiteQueuePath(readStringWithDefault("SQLITE_QUEUE_PATH", "./sync_queue.db"))
+	if err != nil {
+		return Config{}, fmt.Errorf("resolve SQLITE_QUEUE_PATH: %w", err)
+	}
+
 	cfg := Config{
 		LocalPostgresURL:    os.Getenv("LOCAL_POSTGRES_URL"),
 		DBSourceMode:        readStringWithDefault("DB_SOURCE_MODE", "manual"),
 		DBSourcePriority:    readCSVWithDefault("DB_SOURCE_PRIORITY", []string{"docker", "local"}),
-		SQLitePath:          readStringWithDefault("SQLITE_QUEUE_PATH", "./sync_queue.db"),
+		SQLitePath:          sqlitePath,
 		SupabaseURL:         os.Getenv("SUPABASE_URL"),
 		SupabaseServiceRole: os.Getenv("SUPABASE_SERVICE_ROLE_KEY"),
 		SupabaseRealtimeURL: os.Getenv("SUPABASE_REALTIME_URL"),
