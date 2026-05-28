@@ -3,6 +3,13 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.4.3] - 2026-05-28
+
+### Añadido
+
+- Logs visibles en bootstrap, outbound e inbound cuando se suben o reciben filas/pedidos.
+- Progreso de carga inicial en Conexiones leído en vivo desde SQLite (filas/tablas ya no quedan en 0/0).
+
 ## [1.4.2] - 2026-05-28
 
 ### Corregido

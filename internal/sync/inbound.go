@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 
@@ -80,6 +81,7 @@ func (w *InboundWorker) retryLoop(ctx context.Context, interval time.Duration) {
 
 func (w *InboundWorker) insertOrQueue(ctx context.Context, pedido models.Pedido) error {
 	if err := w.localPG.InsertPedidoIntoBuzon(ctx, pedido); err == nil {
+		w.runtime.AddLog(fmt.Sprintf("inbound: pedido recibido id=%s cliente=%d", pedido.IDPedidoNube, pedido.IDCliente))
 		return nil
 	}
 
@@ -107,6 +109,7 @@ func (w *InboundWorker) retryQueuedInbound(ctx context.Context) error {
 		if err = w.localPG.InsertPedidoIntoBuzon(ctx, pedido); err != nil {
 			return err
 		}
+		w.runtime.AddLog(fmt.Sprintf("inbound: pedido reintentado id=%s cliente=%d", pedido.IDPedidoNube, pedido.IDCliente))
 
 		if err = w.queue.Delete(ctx, job.ID); err != nil {
 			return err

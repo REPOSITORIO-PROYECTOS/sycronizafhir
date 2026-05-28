@@ -87,6 +87,8 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 	}
 
 	failedTables := make([]string, 0)
+	sentRows := 0
+	tablesWithChanges := 0
 	for _, table := range tables {
 		rows, readErr := w.localPG.LoadUpdatedRows(ctx, w.sourceSchema, table.Name, w.lastRun)
 		if readErr != nil {
@@ -109,13 +111,24 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 			failedTables = append(failedTables, table.Name)
 			log.Printf("outbound table upsert failed for %s: %v", table.Name, err)
 			w.runtime.AddLog(fmt.Sprintf("outbound table %s queued after upsert error: %v", table.Name, err))
+			continue
 		}
+
+		sentRows += len(rows)
+		tablesWithChanges++
+		w.runtime.AddLog(fmt.Sprintf("outbound: subidas %d filas a %s", len(rows), table.Name))
 	}
 
 	now := time.Now().UTC()
 	w.lastRun = now
 	if err = w.persistCheckpoint(ctx, now); err != nil {
 		log.Printf("persist outbound checkpoint failed: %v", err)
+	}
+
+	if sentRows == 0 {
+		w.runtime.AddLog("outbound: ciclo sin cambios (0 filas con fecha_modificacion reciente)")
+	} else {
+		w.runtime.AddLog(fmt.Sprintf("outbound: ciclo OK — %d filas en %d tabla(s)", sentRows, tablesWithChanges))
 	}
 
 	if len(failedTables) > 0 {

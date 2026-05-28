@@ -68,6 +68,10 @@ func (w *BootstrapWorker) LoadStatus(ctx context.Context) (BootstrapStatus, erro
 	return status, nil
 }
 
+func LoadBootstrapStatus(ctx context.Context, queue *db.QueueSQLite) (BootstrapStatus, error) {
+	return (&BootstrapWorker{queue: queue}).LoadStatus(ctx)
+}
+
 func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (BootstrapStatus, error) {
 	now := time.Now().UTC()
 	status := BootstrapStatus{State: "pending"}
@@ -98,6 +102,10 @@ func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (B
 			return w.fail(ctx, status, fmt.Sprintf("persist status: %v", persistErr))
 		}
 		w.runtime.SetComponentStatus("bootstrap", "running", "reanudando carga inicial")
+		w.runtime.AddLog(fmt.Sprintf(
+			"bootstrap: reanudando carga (%d tablas, filas %d/%d, tabla actual %s)",
+			len(tables), status.ProcessedRows, status.TotalRows, status.CurrentTable,
+		))
 	} else {
 		status = BootstrapStatus{
 			State:       "running",
@@ -111,6 +119,7 @@ func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (B
 			return w.fail(ctx, status, fmt.Sprintf("persist status: %v", persistErr))
 		}
 		w.runtime.SetComponentStatus("bootstrap", "running", "carga inicial en curso")
+		w.runtime.AddLog(fmt.Sprintf("bootstrap: iniciando carga inicial de %d tablas", len(tables)))
 	}
 
 	startIndex := 0
@@ -154,6 +163,10 @@ func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (B
 		if persistErr := w.persistStatus(ctx, status); persistErr != nil {
 			return w.fail(ctx, status, fmt.Sprintf("persist status: %v", persistErr))
 		}
+		w.runtime.AddLog(fmt.Sprintf(
+			"bootstrap: procesando tabla %s (%d/%d, ~%d filas locales)",
+			table.Name, tableIndex+1, len(tables), tableTotal,
+		))
 
 		offset := 0
 		if resume && tableIndex == startIndex && status.LastOffset > 0 {
@@ -179,6 +192,10 @@ func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (B
 			if persistErr := w.persistStatus(ctx, status); persistErr != nil {
 				return w.fail(ctx, status, fmt.Sprintf("persist status: %v", persistErr))
 			}
+			w.runtime.AddLog(fmt.Sprintf(
+				"bootstrap: subidas %d filas a %s (progreso %d/%d filas, tabla %d/%d)",
+				len(rows), table.Name, status.ProcessedRows, status.TotalRows, tableIndex+1, len(tables),
+			))
 		}
 		status.CompletedTable = tableIndex + 1
 		status.LastOffset = 0
@@ -186,6 +203,7 @@ func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (B
 		if persistErr := w.persistStatus(ctx, status); persistErr != nil {
 			return w.fail(ctx, status, fmt.Sprintf("persist status: %v", persistErr))
 		}
+		w.runtime.AddLog(fmt.Sprintf("bootstrap: tabla %s completada", table.Name))
 	}
 
 	status.State = "completed"
@@ -195,6 +213,10 @@ func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (B
 		return w.fail(ctx, status, fmt.Sprintf("persist status: %v", err))
 	}
 	w.runtime.SetComponentStatus("bootstrap", "ok", "carga inicial completada")
+	w.runtime.AddLog(fmt.Sprintf(
+		"bootstrap: carga inicial completada (%d filas en %d tablas)",
+		status.ProcessedRows, len(tables),
+	))
 	return status, nil
 }
 
@@ -236,6 +258,7 @@ func (w *BootstrapWorker) fail(ctx context.Context, status BootstrapStatus, mess
 	status.UpdatedAt = time.Now().UTC()
 	_ = w.persistStatus(ctx, status)
 	w.runtime.SetComponentStatus("bootstrap", "error", message)
+	w.runtime.AddLog("bootstrap: fallo — " + message)
 	return status, errors.New(message)
 }
 

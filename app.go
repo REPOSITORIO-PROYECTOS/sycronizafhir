@@ -322,8 +322,24 @@ func (a *App) StartInitialFullLoad() DatabaseSourceResult {
 
 func (a *App) GetInitialLoadStatus() syncworker.BootstrapStatus {
 	a.bootstrapMu.Lock()
-	defer a.bootstrapMu.Unlock()
-	return a.bootstrapState
+	memState := a.bootstrapState
+	a.bootstrapMu.Unlock()
+
+	if a.cfg == nil {
+		return memState
+	}
+
+	queueDB, err := db.NewSQLiteQueue(a.cfg.SQLitePath)
+	if err != nil {
+		return memState
+	}
+	defer queueDB.Close()
+
+	persisted, err := syncworker.LoadBootstrapStatus(context.Background(), queueDB)
+	if err != nil || persisted.State == "pending" {
+		return memState
+	}
+	return persisted
 }
 
 func (a *App) runBootstrap(selected db.SourceCandidate) {
@@ -368,7 +384,6 @@ func (a *App) runBootstrap(selected db.SourceCandidate) {
 		a.runtime.AddLog("bootstrap full load fallo: " + runErr.Error())
 		return
 	}
-	a.runtime.AddLog("bootstrap full load completado")
 }
 
 func (a *App) setBootstrapFailed(message string) {
