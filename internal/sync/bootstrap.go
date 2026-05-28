@@ -41,7 +41,10 @@ type BootstrapWorker struct {
 	chunkSize    int
 }
 
-func NewBootstrapWorker(localPG *db.LocalPG, queue *db.QueueSQLite, pgClient *supabase.PGClient, sourceSchema string, exclude []string, runtime *monitor.Runtime) *BootstrapWorker {
+func NewBootstrapWorker(localPG *db.LocalPG, queue *db.QueueSQLite, pgClient *supabase.PGClient, sourceSchema string, exclude []string, runtime *monitor.Runtime, chunkSize int) *BootstrapWorker {
+	if chunkSize <= 0 {
+		chunkSize = 500
+	}
 	return &BootstrapWorker{
 		localPG:      localPG,
 		queue:        queue,
@@ -49,7 +52,7 @@ func NewBootstrapWorker(localPG *db.LocalPG, queue *db.QueueSQLite, pgClient *su
 		sourceSchema: sourceSchema,
 		exclude:      exclude,
 		runtime:      runtime,
-		chunkSize:    200,
+		chunkSize:    chunkSize,
 	}
 }
 
@@ -192,10 +195,13 @@ func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (B
 			if persistErr := w.persistStatus(ctx, status); persistErr != nil {
 				return w.fail(ctx, status, fmt.Sprintf("persist status: %v", persistErr))
 			}
-			w.runtime.AddLog(fmt.Sprintf(
-				"bootstrap: subidas %d filas a %s (progreso %d/%d filas, tabla %d/%d)",
-				len(rows), table.Name, status.ProcessedRows, status.TotalRows, tableIndex+1, len(tables),
-			))
+			prevProcessed := status.ProcessedRows - int64(len(rows))
+			if prevProcessed/1000 != status.ProcessedRows/1000 {
+				w.runtime.AddLog(fmt.Sprintf(
+					"bootstrap: subidas %d filas a %s (progreso %d/%d filas, tabla %d/%d)",
+					len(rows), table.Name, status.ProcessedRows, status.TotalRows, tableIndex+1, len(tables),
+				))
+			}
 		}
 		status.CompletedTable = tableIndex + 1
 		status.LastOffset = 0

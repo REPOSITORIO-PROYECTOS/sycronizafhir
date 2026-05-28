@@ -34,6 +34,7 @@ type Config struct {
 	RealtimeTable       string
 	SourceSchema        string
 	ExcludeTables       []string
+	BootstrapChunkSize  int
 }
 
 func Load() (Config, error) {
@@ -46,6 +47,11 @@ func Load() (Config, error) {
 	}
 
 	presenceSeconds, err := readIntWithDefault("DEVICE_PRESENCE_INTERVAL_SECONDS", 60)
+	if err != nil {
+		return Config{}, err
+	}
+
+	bootstrapChunkSize, err := readIntWithDefault("BOOTSTRAP_CHUNK_SIZE", 500)
 	if err != nil {
 		return Config{}, err
 	}
@@ -78,6 +84,7 @@ func Load() (Config, error) {
 		RealtimeTable:       readStringWithDefault("SUPABASE_REALTIME_TABLE", "pedidos"),
 		SourceSchema:        readStringWithDefault("SYNC_SOURCE_SCHEMA", "public"),
 		ExcludeTables:       readCSV("SYNC_EXCLUDE_TABLES"),
+		BootstrapChunkSize:  bootstrapChunkSize,
 	}
 
 	if override, ok, overrideErr := LoadLocalDBOverride(); overrideErr == nil && ok {

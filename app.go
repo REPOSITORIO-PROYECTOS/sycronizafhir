@@ -369,7 +369,7 @@ func (a *App) runBootstrap(selected db.SourceCandidate) {
 	}
 	defer supabasePG.Close()
 
-	worker := syncworker.NewBootstrapWorker(localPG, queueDB, supabasePG, a.cfg.SourceSchema, a.cfg.ExcludeTables, a.runtime)
+	worker := syncworker.NewBootstrapWorker(localPG, queueDB, supabasePG, a.cfg.SourceSchema, a.cfg.ExcludeTables, a.runtime, a.cfg.BootstrapChunkSize)
 	status, runErr := worker.RunFullLoad(ctx, selected.Kind)
 
 	a.bootstrapMu.Lock()

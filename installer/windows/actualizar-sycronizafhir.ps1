@@ -45,6 +45,17 @@ function Set-InstalledVersion([string]$Version) {
     Set-Content -Path $path -Value $Version -Encoding UTF8
 }
 
+function Sync-InstalledExecutable {
+    param([string]$InstallDir)
+
+    $sourceExe = Join-Path $InstallDir "sycronizafhir-win10plus-amd64.exe"
+    $targetExe = Join-Path $InstallDir "sycronizafhir.exe"
+    if (!(Test-Path $sourceExe)) {
+        throw "No se encontro binario actualizado: $sourceExe"
+    }
+    Copy-Item $sourceExe $targetExe -Force
+}
+
 function Update-FromRelease {
     param(
         $Release,
@@ -70,6 +81,7 @@ function Update-FromRelease {
 
     $installDir = Join-Path ${env:ProgramFiles} "sycronizafhir"
     Copy-Item -Path (Join-Path $extractDir "*") -Destination $installDir -Recurse -Force
+    Sync-InstalledExecutable -InstallDir $installDir
 }
 
 try {

@@ -7,13 +7,20 @@ import (
 	"sort"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type PGClient struct {
-	pool *pgxpool.Pool
+	pool      *pgxpool.Pool
+	tableMeta sync.Map
+}
+
+type cachedTableMeta struct {
+	allowedColumns  map[string]bool
+	requiredColumns []requiredInsertColumn
 }
 
 var safeIdentifierRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
@@ -122,6 +129,7 @@ func (c *PGClient) UpsertRows(ctx context.Context, schemaName, tableName string,
 		return fmt.Errorf("no compatible conflict columns for target table %s.%s", schemaName, tableName)
 	}
 
+	prepared := make([]map[string]interface{}, 0, len(rows))
 	for _, row := range rows {
 		if len(filteredConflicts) == 1 &&
 			filteredConflicts[0] == "id" &&
@@ -134,16 +142,6 @@ func (c *PGClient) UpsertRows(ctx context.Context, schemaName, tableName string,
 			}
 		}
 
-		rowColumns := make([]string, 0, len(row))
-		for key := range row {
-			if allowedColumns[key] && row[key] != nil {
-				rowColumns = append(rowColumns, key)
-			}
-		}
-		sort.Strings(rowColumns)
-		if len(rowColumns) == 0 {
-			continue
-		}
 		for _, name := range filteredConflicts {
 			if _, ok := row[name]; !ok {
 				return fmt.Errorf("conflict column %s missing in payload for %s.%s", name, schemaName, tableName)
@@ -166,15 +164,11 @@ func (c *PGClient) UpsertRows(ctx context.Context, schemaName, tableName string,
 					}
 					row[required.Name] = mockValueForRequired(required, row, filteredConflicts)
 				}
-
-				rowColumns = make([]string, 0, len(row))
-				for key := range row {
-					if allowedColumns[key] && row[key] != nil {
-						rowColumns = append(rowColumns, key)
-					}
-				}
-				sort.Strings(rowColumns)
 			} else {
+				rowColumns := filterRowColumns(row, allowedColumns)
+				if len(rowColumns) == 0 {
+					continue
+				}
 				updated, updateErr := c.updateExistingRow(ctx, schemaName, tableName, rowColumns, filteredConflicts, row)
 				if updateErr != nil {
 					return updateErr
@@ -186,12 +180,104 @@ func (c *PGClient) UpsertRows(ctx context.Context, schemaName, tableName string,
 			}
 		}
 
-		if err = c.upsertSingleRow(ctx, schemaName, tableName, rowColumns, filteredConflicts, row); err != nil {
+		prepared = append(prepared, row)
+	}
+
+	if len(prepared) == 0 {
+		return nil
+	}
+
+	return c.upsertMultiRow(ctx, schemaName, tableName, columnNames, filteredConflicts, prepared)
+}
+
+func filterRowColumns(row map[string]interface{}, allowedColumns map[string]bool) []string {
+	rowColumns := make([]string, 0, len(row))
+	for key := range row {
+		if allowedColumns[key] && row[key] != nil {
+			rowColumns = append(rowColumns, key)
+		}
+	}
+	sort.Strings(rowColumns)
+	return rowColumns
+}
+
+const upsertSubBatchSize = 75
+
+func (c *PGClient) upsertMultiRow(ctx context.Context, schemaName, tableName string, columnNames, conflictColumns []string, rows []map[string]interface{}) error {
+	for start := 0; start < len(rows); start += upsertSubBatchSize {
+		end := start + upsertSubBatchSize
+		if end > len(rows) {
+			end = len(rows)
+		}
+		if err := c.upsertMultiRowBatch(ctx, schemaName, tableName, columnNames, conflictColumns, rows[start:end]); err != nil {
 			return err
 		}
 	}
-
 	return nil
+}
+
+func (c *PGClient) upsertMultiRowBatch(ctx context.Context, schemaName, tableName string, columnNames, conflictColumns []string, rows []map[string]interface{}) error {
+	if len(rows) == 0 {
+		return nil
+	}
+
+	quotedColumns := make([]string, 0, len(columnNames))
+	for _, name := range columnNames {
+		quotedColumns = append(quotedColumns, quoteIdentifier(name))
+	}
+
+	conflictQuoted := make([]string, 0, len(conflictColumns))
+	conflictSet := map[string]bool{}
+	for _, name := range conflictColumns {
+		conflictQuoted = append(conflictQuoted, quoteIdentifier(name))
+		conflictSet[name] = true
+	}
+
+	updates := make([]string, 0, len(columnNames))
+	for _, name := range columnNames {
+		if conflictSet[name] {
+			continue
+		}
+		quoted := quoteIdentifier(name)
+		updates = append(updates, fmt.Sprintf("%s = EXCLUDED.%s", quoted, quoted))
+	}
+
+	var conflictClause string
+	if len(updates) == 0 {
+		conflictClause = "DO NOTHING"
+	} else {
+		conflictClause = "DO UPDATE SET " + strings.Join(updates, ", ")
+	}
+
+	valueGroups := make([]string, 0, len(rows))
+	values := make([]interface{}, 0, len(rows)*len(columnNames))
+	paramIndex := 1
+	for _, row := range rows {
+		placeholders := make([]string, 0, len(columnNames))
+		for _, name := range columnNames {
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramIndex))
+			paramIndex++
+			if value, ok := row[name]; ok {
+				values = append(values, value)
+			} else {
+				values = append(values, nil)
+			}
+		}
+		valueGroups = append(valueGroups, "("+strings.Join(placeholders, ", ")+")")
+	}
+
+	query := fmt.Sprintf(
+		"INSERT INTO %s.%s (%s) VALUES %s ON CONFLICT (%s) %s",
+		quoteIdentifier(schemaName),
+		quoteIdentifier(tableName),
+		strings.Join(quotedColumns, ", "),
+		strings.Join(valueGroups, ", "),
+		strings.Join(conflictQuoted, ", "),
+		conflictClause,
+	)
+
+	_, err := c.pool.Exec(ctx, query, values...)
+	return err
 }
 
 func (c *PGClient) upsertSingleRow(ctx context.Context, schemaName, tableName string, columnNames, conflictColumns []string, row map[string]interface{}) error {
@@ -249,6 +335,45 @@ func quoteIdentifier(identifier string) string {
 }
 
 func (c *PGClient) readTableColumns(ctx context.Context, schemaName, tableName string) (map[string]bool, error) {
+	meta, err := c.loadTableMeta(ctx, schemaName, tableName)
+	if err != nil {
+		return nil, err
+	}
+	return meta.allowedColumns, nil
+}
+
+func (c *PGClient) readRequiredInsertColumns(ctx context.Context, schemaName, tableName string) ([]requiredInsertColumn, error) {
+	meta, err := c.loadTableMeta(ctx, schemaName, tableName)
+	if err != nil {
+		return nil, err
+	}
+	return meta.requiredColumns, nil
+}
+
+func (c *PGClient) loadTableMeta(ctx context.Context, schemaName, tableName string) (cachedTableMeta, error) {
+	cacheKey := schemaName + "." + tableName
+	if cached, ok := c.tableMeta.Load(cacheKey); ok {
+		return cached.(cachedTableMeta), nil
+	}
+
+	allowedColumns, err := c.readTableColumnsUncached(ctx, schemaName, tableName)
+	if err != nil {
+		return cachedTableMeta{}, err
+	}
+	requiredColumns, err := c.readRequiredInsertColumnsUncached(ctx, schemaName, tableName)
+	if err != nil {
+		return cachedTableMeta{}, err
+	}
+
+	meta := cachedTableMeta{
+		allowedColumns:  allowedColumns,
+		requiredColumns: requiredColumns,
+	}
+	c.tableMeta.Store(cacheKey, meta)
+	return meta, nil
+}
+
+func (c *PGClient) readTableColumnsUncached(ctx context.Context, schemaName, tableName string) (map[string]bool, error) {
 	const query = `
 		SELECT column_name
 		FROM information_schema.columns
@@ -314,7 +439,7 @@ func (c *PGClient) readPrimaryKeys(ctx context.Context, schemaName, tableName st
 	return keys, nil
 }
 
-func (c *PGClient) readRequiredInsertColumns(ctx context.Context, schemaName, tableName string) ([]requiredInsertColumn, error) {
+func (c *PGClient) readRequiredInsertColumnsUncached(ctx context.Context, schemaName, tableName string) ([]requiredInsertColumn, error) {
 	const query = `
 		SELECT column_name, data_type
 		FROM information_schema.columns

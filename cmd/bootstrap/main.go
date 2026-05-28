@@ -56,7 +56,7 @@ func main() {
 	defer supabasePG.Close()
 
 	rt := monitor.NewRuntime()
-	worker := syncworker.NewBootstrapWorker(localPG, queueDB, supabasePG, cfg.SourceSchema, cfg.ExcludeTables, rt)
+	worker := syncworker.NewBootstrapWorker(localPG, queueDB, supabasePG, cfg.SourceSchema, cfg.ExcludeTables, rt, cfg.BootstrapChunkSize)
 	type result struct {
 		status syncworker.BootstrapStatus
 		err    error

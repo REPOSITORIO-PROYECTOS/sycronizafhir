@@ -3,6 +3,16 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.4.4] - 2026-05-28
+
+### Cambiado
+
+- Bootstrap mucho más rápido: upsert por lotes (75 filas por query) en lugar de 1 INSERT por fila.
+- Tamaño de lote configurable con `BOOTSTRAP_CHUNK_SIZE` (default 500, antes 200).
+- Cache de metadatos de tablas Supabase durante la carga inicial.
+- Logs de bootstrap cada 1000 filas (menos ruido en tablas grandes).
+- Auto-update copia el binario a `sycronizafhir.exe` tras descargar el ZIP.
+
 ## [1.4.3] - 2026-05-28
 
 ### Añadido
