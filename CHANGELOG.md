@@ -3,6 +3,12 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.4.5] - 2026-05-28
+
+### Corregido
+
+- Bootstrap reanuda automaticamente al abrir la app si quedo en estado `running` (antes la UI mostraba progreso pero el worker no arrancaba tras reiniciar/actualizar).
+
 ## [1.4.4] - 2026-05-28
 
 ### Cambiado

@@ -22,11 +22,12 @@ import (
 )
 
 type App struct {
-	ctx            context.Context
-	runtime        *monitor.Runtime
-	cfg            *config.Config
-	bootstrapMu    sync.Mutex
-	bootstrapState syncworker.BootstrapStatus
+	ctx             context.Context
+	runtime         *monitor.Runtime
+	cfg             *config.Config
+	bootstrapMu     sync.Mutex
+	bootstrapState  syncworker.BootstrapStatus
+	bootstrapActive bool
 }
 
 type ConfigSummary struct {
@@ -83,6 +84,7 @@ func (a *App) startup(ctx context.Context) {
 	})
 
 	a.runtime.AddLog("frontend conectado")
+	go a.resumeBootstrapIfNeeded()
 }
 
 func (a *App) shutdown(ctx context.Context) {
@@ -299,10 +301,11 @@ func (a *App) StartInitialFullLoad() DatabaseSourceResult {
 	}
 
 	a.bootstrapMu.Lock()
-	if a.bootstrapState.State == "running" {
+	if a.bootstrapActive {
 		a.bootstrapMu.Unlock()
 		return DatabaseSourceResult{Success: false, Message: "bootstrap ya en curso", Selected: &resolution.Selected}
 	}
+	a.bootstrapActive = true
 	a.bootstrapState = syncworker.BootstrapStatus{
 		State:      "running",
 		SourceKind: resolution.Selected.Kind,
@@ -343,6 +346,12 @@ func (a *App) GetInitialLoadStatus() syncworker.BootstrapStatus {
 }
 
 func (a *App) runBootstrap(selected db.SourceCandidate) {
+	defer func() {
+		a.bootstrapMu.Lock()
+		a.bootstrapActive = false
+		a.bootstrapMu.Unlock()
+	}()
+
 	if a.cfg == nil {
 		return
 	}
@@ -393,6 +402,46 @@ func (a *App) setBootstrapFailed(message string) {
 	a.bootstrapState.LastError = message
 	a.bootstrapState.UpdatedAt = time.Now().UTC()
 	a.runtime.SetComponentStatus("bootstrap", "error", message)
+}
+
+func (a *App) resumeBootstrapIfNeeded() {
+	if a.cfg == nil {
+		return
+	}
+
+	queueDB, err := db.NewSQLiteQueue(a.cfg.SQLitePath)
+	if err != nil {
+		return
+	}
+	defer queueDB.Close()
+
+	status, err := syncworker.LoadBootstrapStatus(context.Background(), queueDB)
+	if err != nil || status.State != "running" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	resolution, resolveErr := db.ResolveLocalPostgresSource(ctx, *a.cfg)
+	cancel()
+	if resolveErr != nil {
+		a.runtime.AddLog("bootstrap: no se pudo reanudar tras reinicio: " + resolveErr.Error())
+		return
+	}
+
+	a.bootstrapMu.Lock()
+	if a.bootstrapActive {
+		a.bootstrapMu.Unlock()
+		return
+	}
+	a.bootstrapActive = true
+	a.bootstrapState = status
+	a.bootstrapMu.Unlock()
+
+	a.runtime.AddLog(fmt.Sprintf(
+		"bootstrap: reanudando carga pendiente (%s, %d/%d filas, tabla %s)",
+		status.SourceKind, status.ProcessedRows, status.TotalRows, status.CurrentTable,
+	))
+	go a.runBootstrap(resolution.Selected)
 }
 
 func summarizePostgresURL(rawURL string) string {
