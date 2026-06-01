@@ -15,7 +15,7 @@ import (
 )
 
 const bootstrapStateKey = "bootstrap_full_load_state"
-const bootstrapStatusPersistMinInterval = 2 * time.Second
+const bootstrapStatusPersistMinInterval = 5 * time.Second
 
 type BootstrapStatus struct {
 	State          string    `json:"state"`
@@ -292,6 +292,10 @@ func (w *BootstrapWorker) persistStatus(ctx context.Context, status BootstrapSta
 		return err
 	}
 	if err = w.queue.SetStateValue(ctx, bootstrapStateKey, string(raw)); err != nil {
+		if !force {
+			w.runtime.AddLog("bootstrap: aviso — no se pudo guardar progreso en sqlite (se reintentara): " + err.Error())
+			return nil
+		}
 		return err
 	}
 	return nil

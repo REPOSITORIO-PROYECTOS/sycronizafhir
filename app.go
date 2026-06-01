@@ -26,6 +26,7 @@ type App struct {
 	runtime         *monitor.Runtime
 	cfg             *config.Config
 	queue           *db.QueueSQLite
+	bootstrapStore  *db.QueueSQLite
 	bootstrapMu     sync.Mutex
 	bootstrapState  syncworker.BootstrapStatus
 	bootstrapActive bool
@@ -67,11 +68,12 @@ type DatabaseSourceResult struct {
 	Candidates []db.SourceCandidate `json:"candidates,omitempty"`
 }
 
-func NewApp(rt *monitor.Runtime, cfg *config.Config, queue *db.QueueSQLite) *App {
+func NewApp(rt *monitor.Runtime, cfg *config.Config, queue, bootstrapStore *db.QueueSQLite) *App {
 	return &App{
-		runtime: rt,
-		cfg:     cfg,
-		queue:   queue,
+		runtime:        rt,
+		cfg:            cfg,
+		queue:          queue,
+		bootstrapStore: bootstrapStore,
 	}
 }
 
@@ -330,11 +332,11 @@ func (a *App) GetInitialLoadStatus() syncworker.BootstrapStatus {
 	memState := a.bootstrapState
 	a.bootstrapMu.Unlock()
 
-	if a.cfg == nil || a.queue == nil {
+	if a.cfg == nil || a.bootstrapStore == nil {
 		return memState
 	}
 
-	persisted, err := syncworker.LoadBootstrapStatus(context.Background(), a.queue)
+	persisted, err := syncworker.LoadBootstrapStatus(context.Background(), a.bootstrapStore)
 	if err != nil || persisted.State == "pending" {
 		return memState
 	}
@@ -360,8 +362,8 @@ func (a *App) runBootstrap(selected db.SourceCandidate) {
 	}
 	defer localPG.Close()
 
-	if a.queue == nil {
-		a.setBootstrapFailed("cola sqlite no disponible")
+	if a.bootstrapStore == nil {
+		a.setBootstrapFailed("estado bootstrap sqlite no disponible")
 		return
 	}
 
@@ -372,7 +374,7 @@ func (a *App) runBootstrap(selected db.SourceCandidate) {
 	}
 	defer supabasePG.Close()
 
-	worker := syncworker.NewBootstrapWorker(localPG, a.queue, supabasePG, a.cfg.SourceSchema, a.cfg.ExcludeTables, a.runtime, a.cfg.BootstrapChunkSize)
+	worker := syncworker.NewBootstrapWorker(localPG, a.bootstrapStore, supabasePG, a.cfg.SourceSchema, a.cfg.ExcludeTables, a.runtime, a.cfg.BootstrapChunkSize)
 	status, runErr := worker.RunFullLoad(ctx, selected.Kind)
 
 	a.bootstrapMu.Lock()
@@ -399,11 +401,11 @@ func (a *App) setBootstrapFailed(message string) {
 }
 
 func (a *App) resumeBootstrapIfNeeded() {
-	if a.cfg == nil || a.queue == nil {
+	if a.cfg == nil || a.bootstrapStore == nil {
 		return
 	}
 
-	status, err := syncworker.LoadBootstrapStatus(context.Background(), a.queue)
+	status, err := syncworker.LoadBootstrapStatus(context.Background(), a.bootstrapStore)
 	if err != nil || status.State != "running" {
 		return
 	}

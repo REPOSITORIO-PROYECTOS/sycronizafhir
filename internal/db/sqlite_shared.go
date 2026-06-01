@@ -7,6 +7,7 @@ import (
 
 type sharedSQLiteEntry struct {
 	mu    sync.Mutex
+	opMu  sync.Mutex
 	queue *QueueSQLite
 	refs  int
 }
@@ -26,6 +27,7 @@ func acquireSharedSQLiteQueue(absPath string, open func() (*QueueSQLite, error))
 			return nil, err
 		}
 		queue.path = absPath
+		queue.opMu = &entry.opMu
 		entry.queue = queue
 	}
 

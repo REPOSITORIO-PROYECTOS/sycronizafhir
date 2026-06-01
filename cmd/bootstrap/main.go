@@ -43,11 +43,25 @@ func main() {
 	}
 	defer localPG.Close()
 
-	queueDB, err := db.NewSQLiteQueue(cfg.SQLitePath)
+	bootstrapStatePath, err := config.ResolveBootstrapStateSQLitePath(cfg.SQLitePath)
+	if err != nil {
+		log.Fatalf("resolve bootstrap state sqlite: %v", err)
+	}
+	bootstrapStore, err := db.NewSQLiteQueue(bootstrapStatePath)
+	if err != nil {
+		log.Fatalf("open bootstrap state sqlite: %v", err)
+	}
+	defer bootstrapStore.Close()
+
+	legacyQueue, err := db.NewSQLiteQueue(cfg.SQLitePath)
 	if err != nil {
 		log.Fatalf("open sqlite queue: %v", err)
 	}
-	defer queueDB.Close()
+	defer legacyQueue.Close()
+
+	if err = db.MigrateBootstrapStateIfNeeded(ctx, bootstrapStore, legacyQueue); err != nil {
+		log.Fatalf("migrate bootstrap state: %v", err)
+	}
 
 	supabasePG, err := supabase.NewPGClient(ctx, cfg.SupabaseDBDSN())
 	if err != nil {
@@ -56,7 +70,7 @@ func main() {
 	defer supabasePG.Close()
 
 	rt := monitor.NewRuntime()
-	worker := syncworker.NewBootstrapWorker(localPG, queueDB, supabasePG, cfg.SourceSchema, cfg.ExcludeTables, rt, cfg.BootstrapChunkSize)
+	worker := syncworker.NewBootstrapWorker(localPG, bootstrapStore, supabasePG, cfg.SourceSchema, cfg.ExcludeTables, rt, cfg.BootstrapChunkSize)
 	type result struct {
 		status syncworker.BootstrapStatus
 		err    error

@@ -25,3 +25,13 @@ func ResolveSQLiteQueuePath(configured string) (string, error) {
 
 	return filepath.Join(baseDir, "sycronizafhir", filepath.Base(trimmed)), nil
 }
+
+// ResolveBootstrapStateSQLitePath stores bootstrap progress in a dedicated file so
+// outbound/inbound workers on sync_queue.db cannot block bootstrap checkpoints.
+func ResolveBootstrapStateSQLitePath(queueConfigured string) (string, error) {
+	queuePath, err := ResolveSQLiteQueuePath(queueConfigured)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(queuePath), "bootstrap_state.db"), nil
+}

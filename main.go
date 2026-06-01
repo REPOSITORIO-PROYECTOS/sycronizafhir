@@ -138,7 +138,21 @@ func runWithWindow() {
 	}
 	defer queueDB.Close()
 
-	app := NewApp(rt, &cfg, queueDB)
+	bootstrapStatePath, err := config.ResolveBootstrapStateSQLitePath(cfg.SQLitePath)
+	if err != nil {
+		log.Fatalf("resolve bootstrap state sqlite: %v", err)
+	}
+	bootstrapStore, err := db.NewSQLiteQueue(bootstrapStatePath)
+	if err != nil {
+		log.Fatalf("open bootstrap state sqlite: %v", err)
+	}
+	defer bootstrapStore.Close()
+
+	if err = db.MigrateBootstrapStateIfNeeded(context.Background(), bootstrapStore, queueDB); err != nil {
+		log.Printf("warn: migrar estado bootstrap legacy: %v", err)
+	}
+
+	app := NewApp(rt, &cfg, queueDB, bootstrapStore)
 
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()

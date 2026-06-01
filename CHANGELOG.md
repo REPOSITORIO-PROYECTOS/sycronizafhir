@@ -3,6 +3,13 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.4.7] - 2026-06-01
+
+### Corregido
+
+- Progreso de bootstrap en archivo dedicado `%APPDATA%\\sycronizafhir\\bootstrap_state.db` (ya no compite con outbound en `sync_queue.db`).
+- Mutex por proceso, `busy_timeout` 30 s y mas reintentos en SQLite; persistencia intermedia no aborta la carga si falla un guardado.
+
 ## [1.4.6] - 2026-06-01
 
 ### Corregido
