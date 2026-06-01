@@ -25,6 +25,7 @@ type App struct {
 	ctx             context.Context
 	runtime         *monitor.Runtime
 	cfg             *config.Config
+	queue           *db.QueueSQLite
 	bootstrapMu     sync.Mutex
 	bootstrapState  syncworker.BootstrapStatus
 	bootstrapActive bool
@@ -66,10 +67,11 @@ type DatabaseSourceResult struct {
 	Candidates []db.SourceCandidate `json:"candidates,omitempty"`
 }
 
-func NewApp(rt *monitor.Runtime, cfg *config.Config) *App {
+func NewApp(rt *monitor.Runtime, cfg *config.Config, queue *db.QueueSQLite) *App {
 	return &App{
 		runtime: rt,
 		cfg:     cfg,
+		queue:   queue,
 	}
 }
 
@@ -328,17 +330,11 @@ func (a *App) GetInitialLoadStatus() syncworker.BootstrapStatus {
 	memState := a.bootstrapState
 	a.bootstrapMu.Unlock()
 
-	if a.cfg == nil {
+	if a.cfg == nil || a.queue == nil {
 		return memState
 	}
 
-	queueDB, err := db.NewSQLiteQueue(a.cfg.SQLitePath)
-	if err != nil {
-		return memState
-	}
-	defer queueDB.Close()
-
-	persisted, err := syncworker.LoadBootstrapStatus(context.Background(), queueDB)
+	persisted, err := syncworker.LoadBootstrapStatus(context.Background(), a.queue)
 	if err != nil || persisted.State == "pending" {
 		return memState
 	}
@@ -364,12 +360,10 @@ func (a *App) runBootstrap(selected db.SourceCandidate) {
 	}
 	defer localPG.Close()
 
-	queueDB, err := db.NewSQLiteQueue(a.cfg.SQLitePath)
-	if err != nil {
-		a.setBootstrapFailed(fmt.Sprintf("sqlite bootstrap: %v", err))
+	if a.queue == nil {
+		a.setBootstrapFailed("cola sqlite no disponible")
 		return
 	}
-	defer queueDB.Close()
 
 	supabasePG, err := supabase.NewPGClient(ctx, a.cfg.SupabaseDBDSN())
 	if err != nil {
@@ -378,7 +372,7 @@ func (a *App) runBootstrap(selected db.SourceCandidate) {
 	}
 	defer supabasePG.Close()
 
-	worker := syncworker.NewBootstrapWorker(localPG, queueDB, supabasePG, a.cfg.SourceSchema, a.cfg.ExcludeTables, a.runtime, a.cfg.BootstrapChunkSize)
+	worker := syncworker.NewBootstrapWorker(localPG, a.queue, supabasePG, a.cfg.SourceSchema, a.cfg.ExcludeTables, a.runtime, a.cfg.BootstrapChunkSize)
 	status, runErr := worker.RunFullLoad(ctx, selected.Kind)
 
 	a.bootstrapMu.Lock()
@@ -405,17 +399,11 @@ func (a *App) setBootstrapFailed(message string) {
 }
 
 func (a *App) resumeBootstrapIfNeeded() {
-	if a.cfg == nil {
+	if a.cfg == nil || a.queue == nil {
 		return
 	}
 
-	queueDB, err := db.NewSQLiteQueue(a.cfg.SQLitePath)
-	if err != nil {
-		return
-	}
-	defer queueDB.Close()
-
-	status, err := syncworker.LoadBootstrapStatus(context.Background(), queueDB)
+	status, err := syncworker.LoadBootstrapStatus(context.Background(), a.queue)
 	if err != nil || status.State != "running" {
 		return
 	}

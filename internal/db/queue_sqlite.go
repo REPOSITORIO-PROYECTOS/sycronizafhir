@@ -3,16 +3,22 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
 
+const sqliteBusyTimeoutMs = 10000
+const sqliteStateWriteAttempts = 8
+
 type QueueSQLite struct {
-	db *sql.DB
+	db   *sql.DB
+	path string
 }
 
 type QueueJob struct {
@@ -23,16 +29,24 @@ type QueueJob struct {
 }
 
 func NewSQLiteQueue(path string) (*QueueSQLite, error) {
+	absPath := resolveSQLiteAbsPath(path)
+	return acquireSharedSQLiteQueue(absPath, func() (*QueueSQLite, error) {
+		return openSQLiteQueue(path)
+	})
+}
+
+func openSQLiteQueue(path string) (*QueueSQLite, error) {
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("create sqlite directory: %w", err)
 		}
 	}
 
-	conn, err := sql.Open("sqlite", path)
+	conn, err := sql.Open("sqlite", sqliteQueueDSN(path))
 	if err != nil {
 		return nil, err
 	}
+	conn.SetMaxOpenConns(1)
 
 	if err = conn.Ping(); err != nil {
 		_ = conn.Close()
@@ -45,11 +59,40 @@ func NewSQLiteQueue(path string) (*QueueSQLite, error) {
 		return nil, err
 	}
 
+	if _, err = queue.db.Exec(`PRAGMA journal_mode=WAL;`); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("enable sqlite wal: %w", err)
+	}
+
 	return queue, nil
 }
 
+func sqliteQueueDSN(path string) string {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		absPath = path
+	}
+	return fmt.Sprintf(
+		"file:%s?_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)",
+		filepath.ToSlash(absPath),
+		sqliteBusyTimeoutMs,
+	)
+}
+
+func isSQLiteBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "database is locked") ||
+		strings.Contains(msg, "sqlite_busy")
+}
+
 func (q *QueueSQLite) Close() error {
-	return q.db.Close()
+	if q.path == "" {
+		return q.db.Close()
+	}
+	return releaseSharedSQLiteQueue(q.path)
 }
 
 func (q *QueueSQLite) createSchema() error {
@@ -121,16 +164,32 @@ func (q *QueueSQLite) Delete(ctx context.Context, id int64) error {
 func (q *QueueSQLite) GetStateValue(ctx context.Context, key string) (string, bool, error) {
 	const query = `SELECT value FROM sync_state WHERE key = ?`
 
-	var value string
-	err := q.db.QueryRowContext(ctx, query, key).Scan(&value)
-	if err == sql.ErrNoRows {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
+	var lastErr error
+	for attempt := 0; attempt < sqliteStateWriteAttempts; attempt++ {
+		if attempt > 0 {
+			delay := time.Duration(25*(1<<attempt)) * time.Millisecond
+			select {
+			case <-ctx.Done():
+				return "", false, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+
+		var value string
+		err := q.db.QueryRowContext(ctx, query, key).Scan(&value)
+		if err == nil {
+			return value, true, nil
+		}
+		if err == sql.ErrNoRows {
+			return "", false, nil
+		}
+		lastErr = err
+		if !isSQLiteBusy(err) {
+			return "", false, err
+		}
 	}
 
-	return value, true, nil
+	return "", false, fmt.Errorf("read sync_state key=%s: %w", key, lastErr)
 }
 
 func (q *QueueSQLite) SetStateValue(ctx context.Context, key, value string) error {
@@ -141,10 +200,26 @@ func (q *QueueSQLite) SetStateValue(ctx context.Context, key, value string) erro
 		value = excluded.value,
 		updated_at = CURRENT_TIMESTAMP`
 
-	_, err := q.db.ExecContext(ctx, query, key, value)
-	if err != nil {
-		return fmt.Errorf("upsert sync_state key=%s: %w", key, err)
+	var lastErr error
+	for attempt := 0; attempt < sqliteStateWriteAttempts; attempt++ {
+		if attempt > 0 {
+			delay := time.Duration(25*(1<<attempt)) * time.Millisecond
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+
+		_, err := q.db.ExecContext(ctx, query, key, value)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isSQLiteBusy(err) {
+			return fmt.Errorf("upsert sync_state key=%s: %w", key, err)
+		}
 	}
 
-	return nil
+	return fmt.Errorf("upsert sync_state key=%s: %w", key, errors.Join(errors.New("sqlite busy after retries"), lastErr))
 }

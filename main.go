@@ -82,7 +82,13 @@ func runBackground() {
 	rt.SetMeta("app_name", "sycronizafhir")
 	rt.SetMeta("mode", "background")
 
-	if err := bootSyncWorkers(ctx, rt, &cfg); err != nil {
+	queueDB, err := db.NewSQLiteQueue(cfg.SQLitePath)
+	if err != nil {
+		log.Fatalf("open sqlite queue: %v", err)
+	}
+	defer queueDB.Close()
+
+	if err := bootSyncWorkers(ctx, rt, &cfg, queueDB); err != nil {
 		log.Fatalf("boot workers: %v", err)
 	}
 
@@ -126,13 +132,19 @@ func runWithWindow() {
 	rt.SetMeta("app_name", "sycronizafhir")
 	rt.SetMeta("mode", "window")
 
-	app := NewApp(rt, &cfg)
+	queueDB, err := db.NewSQLiteQueue(cfg.SQLitePath)
+	if err != nil {
+		log.Fatalf("open sqlite queue: %v", err)
+	}
+	defer queueDB.Close()
+
+	app := NewApp(rt, &cfg, queueDB)
 
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()
 
 	go func() {
-		if err := bootSyncWorkers(workerCtx, rt, &cfg); err != nil {
+		if err := bootSyncWorkers(workerCtx, rt, &cfg, queueDB); err != nil {
 			log.Printf("workers no pudieron arrancar: %v", err)
 		}
 	}()
@@ -169,7 +181,7 @@ func runWithWindow() {
 	rt.AddLog("aplicacion finalizada")
 }
 
-func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Config) error {
+func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Config, queueDB *db.QueueSQLite) error {
 	resolution, resolveErr := db.ResolveLocalPostgresSource(ctx, *cfg)
 	if resolveErr != nil {
 		rt.SetComponentStatus("local_postgres", "error", resolveErr.Error())
@@ -190,18 +202,16 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 	}
 	rt.SetComponentStatus("local_postgres", "running", "conexion OK")
 
-	queueDB, err := db.NewSQLiteQueue(cfg.SQLitePath)
-	if err != nil {
-		rt.SetComponentStatus("sqlite_queue", "error", err.Error())
+	if queueDB == nil {
+		rt.SetComponentStatus("sqlite_queue", "error", "cola sqlite no inicializada")
 		localPG.Close()
-		return fmt.Errorf("open sqlite queue: %w", err)
+		return fmt.Errorf("sqlite queue is nil")
 	}
 	rt.SetComponentStatus("sqlite_queue", "running", "conexion OK")
 
 	supabasePG, err := supabase.NewPGClient(ctx, cfg.SupabaseDBDSN())
 	if err != nil {
 		rt.SetComponentStatus("supabase_postgres", "error", err.Error())
-		queueDB.Close()
 		localPG.Close()
 		return fmt.Errorf("connect supabase postgres: %w", err)
 	}
@@ -295,7 +305,6 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 		rt.SetComponentStatus("app", "stopping", "apagando")
 		wg.Wait()
 		localPG.Close()
-		queueDB.Close()
 		supabasePG.Close()
 		rt.SetComponentStatus("app", "stopped", "servicio detenido")
 		rt.AddLog("workers detenidos")

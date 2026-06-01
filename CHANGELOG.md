@@ -3,6 +3,13 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.4.6] - 2026-06-01
+
+### Corregido
+
+- Cola SQLite: una sola conexion compartida por proceso (WAL, `busy_timeout`, reintentos en `sync_state`) para evitar `database is locked (SQLITE_BUSY)` durante bootstrap cuando outbound/UI escribian al mismo `sync_queue.db`.
+- Bootstrap persiste progreso en SQLite como maximo cada 2 s por chunk (siempre al iniciar, fallar, completar tabla o terminar la carga).
+
 ## [1.4.5] - 2026-05-28
 
 ### Corregido

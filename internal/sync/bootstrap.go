@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"sycronizafhir/internal/db"
@@ -14,6 +15,7 @@ import (
 )
 
 const bootstrapStateKey = "bootstrap_full_load_state"
+const bootstrapStatusPersistMinInterval = 2 * time.Second
 
 type BootstrapStatus struct {
 	State          string    `json:"state"`
@@ -39,6 +41,8 @@ type BootstrapWorker struct {
 	exclude      []string
 	runtime      *monitor.Runtime
 	chunkSize    int
+	persistMu    sync.Mutex
+	lastPersist  time.Time
 }
 
 func NewBootstrapWorker(localPG *db.LocalPG, queue *db.QueueSQLite, pgClient *supabase.PGClient, sourceSchema string, exclude []string, runtime *monitor.Runtime, chunkSize int) *BootstrapWorker {
@@ -101,7 +105,7 @@ func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (B
 		status.UpdatedAt = now
 		status.ChunkSize = w.chunkSize
 		status.TotalTables = len(tables)
-		if persistErr := w.persistStatus(ctx, status); persistErr != nil {
+		if persistErr := w.persistStatus(ctx, status, true); persistErr != nil {
 			return w.fail(ctx, status, fmt.Sprintf("persist status: %v", persistErr))
 		}
 		w.runtime.SetComponentStatus("bootstrap", "running", "reanudando carga inicial")
@@ -118,7 +122,7 @@ func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (B
 			ChunkSize:   w.chunkSize,
 			TotalTables: len(tables),
 		}
-		if persistErr := w.persistStatus(ctx, status); persistErr != nil {
+		if persistErr := w.persistStatus(ctx, status, true); persistErr != nil {
 			return w.fail(ctx, status, fmt.Sprintf("persist status: %v", persistErr))
 		}
 		w.runtime.SetComponentStatus("bootstrap", "running", "carga inicial en curso")
@@ -163,7 +167,7 @@ func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (B
 		}
 		status.CurrentTable = table.Name
 		status.CompletedTable = tableIndex
-		if persistErr := w.persistStatus(ctx, status); persistErr != nil {
+		if persistErr := w.persistStatus(ctx, status, true); persistErr != nil {
 			return w.fail(ctx, status, fmt.Sprintf("persist status: %v", persistErr))
 		}
 		w.runtime.AddLog(fmt.Sprintf(
@@ -192,7 +196,7 @@ func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (B
 			status.LastOffset = offset
 			status.ProcessedRows += int64(len(rows))
 			status.UpdatedAt = time.Now().UTC()
-			if persistErr := w.persistStatus(ctx, status); persistErr != nil {
+			if persistErr := w.persistStatus(ctx, status, false); persistErr != nil {
 				return w.fail(ctx, status, fmt.Sprintf("persist status: %v", persistErr))
 			}
 			prevProcessed := status.ProcessedRows - int64(len(rows))
@@ -206,7 +210,7 @@ func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (B
 		status.CompletedTable = tableIndex + 1
 		status.LastOffset = 0
 		status.UpdatedAt = time.Now().UTC()
-		if persistErr := w.persistStatus(ctx, status); persistErr != nil {
+		if persistErr := w.persistStatus(ctx, status, true); persistErr != nil {
 			return w.fail(ctx, status, fmt.Sprintf("persist status: %v", persistErr))
 		}
 		w.runtime.AddLog(fmt.Sprintf("bootstrap: tabla %s completada", table.Name))
@@ -215,7 +219,7 @@ func (w *BootstrapWorker) RunFullLoad(ctx context.Context, sourceKind string) (B
 	status.State = "completed"
 	status.FinishedAt = time.Now().UTC()
 	status.UpdatedAt = status.FinishedAt
-	if err = w.persistStatus(ctx, status); err != nil {
+	if err = w.persistStatus(ctx, status, true); err != nil {
 		return w.fail(ctx, status, fmt.Sprintf("persist status: %v", err))
 	}
 	w.runtime.SetComponentStatus("bootstrap", "ok", "carga inicial completada")
@@ -262,13 +266,27 @@ func (w *BootstrapWorker) fail(ctx context.Context, status BootstrapStatus, mess
 	status.State = "failed"
 	status.LastError = message
 	status.UpdatedAt = time.Now().UTC()
-	_ = w.persistStatus(ctx, status)
+	_ = w.persistStatus(ctx, status, true)
 	w.runtime.SetComponentStatus("bootstrap", "error", message)
 	w.runtime.AddLog("bootstrap: fallo — " + message)
 	return status, errors.New(message)
 }
 
-func (w *BootstrapWorker) persistStatus(ctx context.Context, status BootstrapStatus) error {
+func (w *BootstrapWorker) persistStatus(ctx context.Context, status BootstrapStatus, force bool) error {
+	if !force {
+		w.persistMu.Lock()
+		if !w.lastPersist.IsZero() && time.Since(w.lastPersist) < bootstrapStatusPersistMinInterval {
+			w.persistMu.Unlock()
+			return nil
+		}
+		w.lastPersist = time.Now()
+		w.persistMu.Unlock()
+	} else {
+		w.persistMu.Lock()
+		w.lastPersist = time.Now()
+		w.persistMu.Unlock()
+	}
+
 	raw, err := json.Marshal(status)
 	if err != nil {
 		return err
