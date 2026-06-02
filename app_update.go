@@ -15,6 +15,10 @@ func (a *App) CheckForUpdate() updater.Status {
 	return updater.Check(ctx)
 }
 
+func (a *App) GetAppVersion() string {
+	return updater.FormatDisplayVersion(updater.ProductVersion())
+}
+
 func (a *App) ApplyUpdate() updater.ApplyResult {
 	result := updater.Apply(true)
 	if !result.Success {
@@ -24,7 +28,7 @@ func (a *App) ApplyUpdate() updater.ApplyResult {
 	if a.ctx != nil {
 		a.runtime.AddLog("actualizacion: cerrando aplicacion para aplicar release")
 		go func() {
-			time.Sleep(400 * time.Millisecond)
+			time.Sleep(2 * time.Second)
 			wailsruntime.Quit(a.ctx)
 		}()
 	}

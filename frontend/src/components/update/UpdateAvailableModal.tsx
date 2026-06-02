@@ -52,16 +52,33 @@ export function UpdateAvailableModal({
               Hay una nueva version de sycronizafhir
             </h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Version actual:{" "}
+              En ejecucion:{" "}
               <span className="font-mono text-foreground">
-                {status.current_version || "desconocida"}
+                {status.running_version || status.current_version || "desconocida"}
               </span>
+              {status.installed_version &&
+              status.running_version &&
+              status.installed_version !== status.running_version ? (
+                <>
+                  {" · "}
+                  Instalada:{" "}
+                  <span className="font-mono text-foreground">
+                    {status.installed_version}
+                  </span>
+                </>
+              ) : null}
               {" → "}
               Nueva:{" "}
               <span className="font-mono text-foreground">
                 {status.latest_version}
               </span>
             </p>
+            {status.pending_restart ? (
+              <p className="mt-2 text-sm text-amber-600 dark:text-amber-400">
+                La actualizacion se descargo pero el ejecutable en uso es anterior.
+                Pulsa Actualizar ahora para reemplazar el .exe y limpiar cache de la UI.
+              </p>
+            ) : null}
           </div>
 
           <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-sm text-muted-foreground">

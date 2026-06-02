@@ -4,7 +4,7 @@ import "strings"
 
 // productVersion se puede sobrescribir en build con:
 // -ldflags "-X sycronizafhir/internal/updater.productVersion=1.4.7"
-var productVersion = "1.4.7"
+var productVersion = "1.5.1"
 
 func ProductVersion() string {
 	return strings.TrimSpace(productVersion)

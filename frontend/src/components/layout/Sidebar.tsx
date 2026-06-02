@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -9,7 +10,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import packageJson from "../../../package.json";
+import { bridge } from "@/lib/bridge";
 
 const NAV = [
   { to: "/", label: "Panel", icon: LayoutDashboard },
@@ -21,6 +22,12 @@ const NAV = [
 ] as const;
 
 export function Sidebar() {
+  const { data: appVersion } = useQuery({
+    queryKey: ["app-version"],
+    queryFn: () => bridge.getAppVersion(),
+    staleTime: 60_000,
+  });
+
   return (
     <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-border/60 bg-card/40 backdrop-blur">
       <div className="flex items-center gap-2 px-5 py-5">
@@ -58,7 +65,7 @@ export function Sidebar() {
 
       <div className="border-t border-border/60 p-4 text-[11px] leading-relaxed text-muted-foreground">
         <p>
-          v{packageJson.version} — Wails + WebView2
+          {appVersion ?? "v…"} — Wails + WebView2
         </p>
         <p className="text-foreground/70">Agencia TA, Soluciones Empresariales</p>
       </div>

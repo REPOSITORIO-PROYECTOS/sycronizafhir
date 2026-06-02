@@ -17,51 +17,70 @@ const defaultInstallDir = `C:\Program Files\sycronizafhir`
 
 func Check(ctx context.Context) Status {
 	installDir, fromInstall := resolveInstallDir()
-	current := readInstalledVersion(installDir)
-	if current == "" {
-		current = ProductVersion()
+	running := ProductVersion()
+	installed := readInstalledVersion(installDir)
+	current := running
+	if strings.TrimSpace(current) == "" {
+		current = installed
 	}
+
+	pendingRestart := installed != "" && running != "" && !VersionsEqual(installed, running)
 
 	cfg, cfgErr := loadConfig(installDir)
 	if cfgErr != nil {
 		return Status{
-			CurrentVersion: current,
-			CanApply:       fromInstall,
-			Message:        cfgErr.Error(),
+			CurrentVersion:   FormatDisplayVersion(current),
+			RunningVersion:   FormatDisplayVersion(running),
+			InstalledVersion: FormatDisplayVersion(installed),
+			PendingRestart:   pendingRestart,
+			CanApply:         fromInstall,
+			Message:          cfgErr.Error(),
 		}
 	}
 	if !cfg.Enabled {
 		return Status{
-			CurrentVersion: current,
-			CanApply:       false,
-			Message:        "Auto-actualizacion deshabilitada en github-update-config.json",
+			CurrentVersion:   FormatDisplayVersion(current),
+			RunningVersion:   FormatDisplayVersion(running),
+			InstalledVersion: FormatDisplayVersion(installed),
+			PendingRestart:   pendingRestart,
+			CanApply:         false,
+			Message:          "Auto-actualizacion deshabilitada en github-update-config.json",
 		}
 	}
 
 	release, err := fetchLatestRelease(ctx, cfg.GithubOwner, cfg.GithubRepo, cfg.GithubToken)
 	if err != nil {
 		return Status{
-			CurrentVersion: current,
-			CanApply:       fromInstall,
-			Message:        err.Error(),
+			CurrentVersion:   FormatDisplayVersion(current),
+			RunningVersion:   FormatDisplayVersion(running),
+			InstalledVersion: FormatDisplayVersion(installed),
+			PendingRestart:   pendingRestart,
+			CanApply:         fromInstall,
+			Message:          err.Error(),
 		}
 	}
 
 	latest := release.TagName
-	available := !VersionsEqual(current, latest)
+	available := !VersionsEqual(running, latest)
 	message := "Estas en la ultima version."
-	if available {
+	if pendingRestart {
+		message = "Hay archivos nuevos instalados pero la app sigue con la version anterior. Cierra y abre de nuevo o aplica la actualizacion."
+		available = true
+	} else if available {
 		message = fmt.Sprintf("Hay una actualizacion disponible: %s", latest)
 	}
 
 	return Status{
-		Available:      available,
-		CurrentVersion: current,
-		LatestVersion:  latest,
-		ReleaseURL:     release.HTMLURL,
-		ReleaseNotes:   strings.TrimSpace(release.Body),
-		CanApply:       fromInstall && available,
-		Message:        message,
+		Available:        available,
+		CurrentVersion:   FormatDisplayVersion(current),
+		RunningVersion:   FormatDisplayVersion(running),
+		InstalledVersion: FormatDisplayVersion(installed),
+		PendingRestart:   pendingRestart,
+		LatestVersion:    latest,
+		ReleaseURL:       release.HTMLURL,
+		ReleaseNotes:     strings.TrimSpace(release.Body),
+		CanApply:         fromInstall && available,
+		Message:          message,
 	}
 }
 
@@ -86,9 +105,11 @@ func Apply(reopenMonitor bool) ApplyResult {
 	if reopenMonitor {
 		reopenFlag = " -ReopenMonitor"
 	}
+	waitPid := os.Getpid()
 	elevated := fmt.Sprintf(
-		`Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \"%s\"%s'`,
+		`Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \"%s\" -WaitPid %d%s'`,
 		scriptPath,
+		waitPid,
 		reopenFlag,
 	)
 

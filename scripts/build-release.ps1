@@ -25,6 +25,18 @@ Write-Step "Limpiando carpeta dist"
 if (Test-Path $packageDir) { Remove-Item $packageDir -Recurse -Force }
 New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
 
+$productVersionRaw = (Get-Content (Join-Path $root "VERSION") -Raw).Trim()
+Write-Step "Sincronizando version $productVersionRaw en manifests"
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+$wailsJsonPath = Join-Path $root "wails.json"
+$wailsRaw = [System.IO.File]::ReadAllText($wailsJsonPath)
+$wailsRaw = [regex]::Replace($wailsRaw, '"productVersion"\s*:\s*"[^"]*"', "`"productVersion`": `"$productVersionRaw`"")
+[System.IO.File]::WriteAllText($wailsJsonPath, $wailsRaw, $utf8NoBom)
+$packageJsonPath = Join-Path $root "frontend\package.json"
+$packageRaw = [System.IO.File]::ReadAllText($packageJsonPath)
+$packageRaw = [regex]::Replace($packageRaw, '"version"\s*:\s*"[^"]*"', "`"version`": `"$productVersionRaw`"", 1)
+[System.IO.File]::WriteAllText($packageJsonPath, $packageRaw, $utf8NoBom)
+
 Write-Step "Compilando frontend + binario principal con wails build"
 Push-Location $root
 try {

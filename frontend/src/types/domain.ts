@@ -2,6 +2,9 @@ export interface UpdateStatus {
   available: boolean;
   current_version: string;
   latest_version: string;
+  running_version?: string;
+  installed_version?: string;
+  pending_restart?: boolean;
   release_url?: string;
   release_notes?: string;
   can_apply: boolean;

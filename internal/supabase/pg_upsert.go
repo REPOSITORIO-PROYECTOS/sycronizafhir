@@ -415,7 +415,7 @@ func (c *PGClient) upsertMultiRowBatch(ctx context.Context, schemaName, tableNam
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramIndex))
 			paramIndex++
 			if value, ok := row[name]; ok {
-				values = append(values, value)
+				values = append(values, normalizeParamValue(value))
 			} else {
 				values = append(values, nil)
 			}
@@ -444,7 +444,7 @@ func (c *PGClient) upsertSingleRow(ctx context.Context, schemaName, tableName st
 	for index, name := range columnNames {
 		quotedColumns = append(quotedColumns, quoteIdentifier(name))
 		valuePlaceholders = append(valuePlaceholders, fmt.Sprintf("$%d", index+1))
-		values = append(values, row[name])
+		values = append(values, normalizeParamValue(row[name]))
 	}
 
 	conflictQuoted := make([]string, 0, len(conflictColumns))
@@ -714,7 +714,7 @@ func (c *PGClient) updateExistingRow(ctx context.Context, schemaName, tableName 
 			return false, fmt.Errorf("conflict column %s missing in payload for %s.%s", name, schemaName, tableName)
 		}
 		whereParts = append(whereParts, fmt.Sprintf("%s = $%d", quoteIdentifier(name), i+1))
-		whereValues = append(whereValues, row[name])
+		whereValues = append(whereValues, normalizeParamValue(row[name]))
 	}
 
 	updateColumns := make([]string, 0, len(rowColumns))
@@ -744,7 +744,7 @@ func (c *PGClient) updateExistingRow(ctx context.Context, schemaName, tableName 
 	values := make([]interface{}, 0, len(updateColumns)+len(whereValues))
 	for i, name := range updateColumns {
 		setParts = append(setParts, fmt.Sprintf("%s = $%d", quoteIdentifier(name), i+1))
-		values = append(values, row[name])
+		values = append(values, normalizeParamValue(row[name]))
 	}
 
 	wherePartsUpdate := make([]string, 0, len(conflictColumns))

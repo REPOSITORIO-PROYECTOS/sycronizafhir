@@ -3,6 +3,14 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.5.1] - 2026-06-02
+
+### Corregido
+
+- Auto-update: espera cierre del proceso, reintentos al copiar `sycronizafhir.exe`, verifica tamano y limpia cache WebView2.
+- Deteccion de version usa el binario en ejecucion (no solo `version.txt`) para evitar loop "actualizacion disponible" con UI vieja.
+- Sidebar muestra version real del ejecutable; build sincroniza `VERSION`, `package.json` y `wails.json`.
+
 ## [1.5.0] - 2026-06-02
 
 ### Agregado

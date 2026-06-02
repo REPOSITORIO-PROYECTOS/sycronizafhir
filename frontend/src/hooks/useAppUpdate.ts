@@ -28,7 +28,10 @@ export function useAppUpdate() {
   }, []);
 
   useEffect(() => {
-    void checkForUpdate();
+    const timer = window.setTimeout(() => {
+      void checkForUpdate();
+    }, 2500);
+    return () => window.clearTimeout(timer);
   }, [checkForUpdate]);
 
   const dismiss = useCallback(() => {

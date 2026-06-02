@@ -36,6 +36,7 @@ interface AppBindings {
   GetInitialLoadStatus: () => Promise<BootstrapStatus>;
   CheckForUpdate: () => Promise<UpdateStatus>;
   ApplyUpdate: () => Promise<UpdateApplyResult>;
+  GetAppVersion: () => Promise<string>;
   GetSyncTablesConfig: () => Promise<SyncTablesConfig>;
   SaveSyncTablesConfig: (input: SyncTablesConfig) => Promise<SyncTablesConfig>;
   ListAvailableSyncTables: () => Promise<AvailableSyncTable[]>;
@@ -335,6 +336,12 @@ export const bridge = {
       success: false,
       message: "Actualizacion no disponible en modo navegador.",
     };
+  },
+  async getAppVersion(): Promise<string> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.GetAppVersion();
+    }
+    return "v1.5.1";
   },
   async getSyncTablesConfig(): Promise<SyncTablesConfig> {
     if (isWailsAvailable()) {

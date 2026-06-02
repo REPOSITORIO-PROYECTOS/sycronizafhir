@@ -24,15 +24,23 @@ import (
 	"sycronizafhir/internal/monitor"
 	"sycronizafhir/internal/supabase"
 	syncworker "sycronizafhir/internal/sync"
+	"sycronizafhir/internal/updater"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
 func main() {
-	isBackgroundMode := parseBackgroundMode()
+	showVersion := flag.Bool("version", false, "imprime la version embebida y sale")
+	backgroundFlag := flag.Bool("background", false, "inicia sin abrir la ventana de monitor")
+	flag.Parse()
 
-	if isBackgroundMode {
+	if *showVersion {
+		fmt.Println(updater.ProductVersion())
+		return
+	}
+
+	if isBackgroundMode(*backgroundFlag) {
 		runBackground()
 		return
 	}
@@ -40,15 +48,12 @@ func main() {
 	runWithWindow()
 }
 
-func parseBackgroundMode() bool {
-	startMode := strings.TrimSpace(strings.ToLower(os.Getenv("SYNC_APP_START_MODE")))
-	if startMode == "background" {
+func isBackgroundMode(backgroundFlag bool) bool {
+	if backgroundFlag {
 		return true
 	}
-
-	backgroundFlag := flag.Bool("background", false, "inicia sin abrir la ventana de monitor")
-	flag.Parse()
-	return *backgroundFlag
+	startMode := strings.TrimSpace(strings.ToLower(os.Getenv("SYNC_APP_START_MODE")))
+	return startMode == "background"
 }
 
 func runBackground() {
@@ -97,6 +102,10 @@ func runBackground() {
 }
 
 func runWithWindow() {
+	updater.ClearWebviewCacheIfVersionChanged()
+
+	webviewPath := updater.WebviewUserDataPath()
+
 	lock, exists, err := acquireMutex(mutexName)
 	if err != nil {
 		log.Printf("warn: no se pudo crear mutex global (%v); siguiendo", err)
@@ -183,6 +192,7 @@ func runWithWindow() {
 			DisableWindowIcon:                 false,
 			DisableFramelessWindowDecorations: false,
 			Theme:                             windows.Dark,
+			WebviewUserDataPath:               webviewPath,
 		},
 	})
 
