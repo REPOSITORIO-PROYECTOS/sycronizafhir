@@ -35,6 +35,7 @@ type Config struct {
 	SourceSchema        string
 	ExcludeTables       []string
 	BootstrapChunkSize  int
+	AuditInterval       time.Duration
 }
 
 func Load() (Config, error) {
@@ -52,6 +53,11 @@ func Load() (Config, error) {
 	}
 
 	bootstrapChunkSize, err := readIntWithDefault("BOOTSTRAP_CHUNK_SIZE", 500)
+	if err != nil {
+		return Config{}, err
+	}
+
+	auditHours, err := readIntWithDefault("SYNC_AUDIT_INTERVAL_HOURS", 6)
 	if err != nil {
 		return Config{}, err
 	}
@@ -85,6 +91,7 @@ func Load() (Config, error) {
 		SourceSchema:        readStringWithDefault("SYNC_SOURCE_SCHEMA", "public"),
 		ExcludeTables:       readCSV("SYNC_EXCLUDE_TABLES"),
 		BootstrapChunkSize:  bootstrapChunkSize,
+		AuditInterval:       time.Duration(auditHours) * time.Hour,
 	}
 
 	if override, ok, overrideErr := LoadLocalDBOverride(); overrideErr == nil && ok {

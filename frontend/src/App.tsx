@@ -5,6 +5,7 @@ import { DashboardView } from "@/views/DashboardView";
 import { ComponentsView } from "@/views/ComponentsView";
 import { ConnectionsView } from "@/views/ConnectionsView";
 import { ScanView } from "@/views/ScanView";
+import { SyncView } from "@/views/SyncView";
 import { LogsView } from "@/views/LogsView";
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
           <Route path="/" element={<DashboardView />} />
           <Route path="/componentes" element={<ComponentsView />} />
           <Route path="/conexiones" element={<ConnectionsView />} />
+          <Route path="/sincronizacion" element={<SyncView />} />
           <Route path="/escaneos" element={<ScanView />} />
           <Route path="/logs" element={<LogsView />} />
           <Route path="*" element={<Navigate to="/" replace />} />

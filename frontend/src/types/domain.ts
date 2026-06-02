@@ -1,3 +1,18 @@
+export interface UpdateStatus {
+  available: boolean;
+  current_version: string;
+  latest_version: string;
+  release_url?: string;
+  release_notes?: string;
+  can_apply: boolean;
+  message?: string;
+}
+
+export interface UpdateApplyResult {
+  success: boolean;
+  message: string;
+}
+
 export type ComponentStatus =
   | "running"
   | "stopping"
@@ -44,6 +59,7 @@ export interface ConfigSummary {
   source_schema: string;
   exclude_tables: string[];
   outbound_every: string;
+  audit_every: string;
   realtime_url: string;
   channel: string;
   schema: string;
@@ -103,4 +119,52 @@ export interface ComponentEventPayload {
 export interface MetaEventPayload {
   key: string;
   value: string;
+}
+
+export interface SyncTablesConfig {
+  enabled_tables: string[];
+  table_mappings: Record<string, string>;
+  auto_audit_interval_hours: number;
+  auto_sync_on_audit: boolean;
+}
+
+export interface AvailableSyncTable {
+  name: string;
+  remote_name: string;
+  primary_keys: string[];
+  enabled: boolean;
+}
+
+export interface TableAuditResult {
+  local_table: string;
+  remote_table: string;
+  local_count: number;
+  remote_count: number;
+  missing_in_remote: number;
+  changed: number;
+  in_sync: number;
+  status: string;
+  error?: string;
+  selected: boolean;
+}
+
+export interface DataAuditReport {
+  audited_at: string;
+  trigger: string;
+  tables: TableAuditResult[];
+  summary: string;
+  auto_sync_applied: boolean;
+  synced_rows: number;
+}
+
+export interface DataAuditActionResult {
+  success: boolean;
+  message: string;
+  report: DataAuditReport;
+}
+
+export interface SyncSelectedResult {
+  success: boolean;
+  message: string;
+  synced_rows: number;
 }

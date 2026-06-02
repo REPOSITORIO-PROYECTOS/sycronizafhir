@@ -1,3 +1,7 @@
+param(
+    [switch]$ReopenMonitor
+)
+
 $ErrorActionPreference = "Stop"
 
 function Write-Log([string]$Message) {
@@ -110,6 +114,16 @@ try {
 
     Start-ScheduledTask -TaskName "sycronizafhir-auto-start"
     Write-Log "Actualización completada a versión $latestVersion"
+
+    if ($ReopenMonitor) {
+        $installDir = Join-Path ${env:ProgramFiles} "sycronizafhir"
+        $exePath = Join-Path $installDir "sycronizafhir.exe"
+        if (Test-Path $exePath) {
+            Start-Sleep -Seconds 1
+            Start-Process -FilePath $exePath -WorkingDirectory $installDir
+            Write-Log "Monitor reabierto tras actualizacion."
+        }
+    }
 }
 catch {
     Write-Log "ERROR update: $($_.Exception.Message)"

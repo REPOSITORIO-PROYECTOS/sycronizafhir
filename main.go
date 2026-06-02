@@ -298,9 +298,12 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 	outbound := syncworker.NewOutboundWorker(localPG, queueDB, supabasePG, *cfg, rt)
 	inbound := syncworker.NewInboundWorker(localPG, queueDB, *cfg, rt)
 	presence := syncworker.NewPresenceWorker(queueDB, supabasePG, *cfg, rt, resolution.Selected.Kind, localDBSummary)
+	audit := syncworker.NewAuditWorker(localPG, supabasePG, queueDB, cfg.SourceSchema, cfg.ExcludeTables, cfg.AuditInterval, rt)
+
+	rt.SetMeta("audit_every", cfg.AuditInterval.String())
 
 	wg := &sync.WaitGroup{}
-	wg.Add(3)
+	wg.Add(4)
 	go func() {
 		defer wg.Done()
 		outbound.Run(ctx)
@@ -312,6 +315,10 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 	go func() {
 		defer wg.Done()
 		presence.Run(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		audit.Run(ctx)
 	}()
 
 	go func() {

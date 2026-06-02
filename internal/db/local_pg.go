@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"sycronizafhir/internal/models"
@@ -310,6 +311,129 @@ func (db *LocalPG) isFechaModificacionDate(ctx context.Context, schemaName, tabl
 	}
 
 	return dataType == "date", nil
+}
+
+func (db *LocalPG) LoadPrimaryKeyRows(ctx context.Context, schemaName, tableName string, pkColumns []string) ([]map[string]interface{}, error) {
+	if !safeIdentifierPattern.MatchString(schemaName) {
+		return nil, fmt.Errorf("invalid schema name: %s", schemaName)
+	}
+	if !safeIdentifierPattern.MatchString(tableName) {
+		return nil, fmt.Errorf("invalid table name: %s", tableName)
+	}
+	if len(pkColumns) == 0 {
+		return nil, errors.New("primary key columns required")
+	}
+	for _, column := range pkColumns {
+		if !safeIdentifierPattern.MatchString(column) {
+			return nil, fmt.Errorf("invalid pk column: %s", column)
+		}
+	}
+
+	selectColumns := make([]string, 0, len(pkColumns))
+	for _, column := range pkColumns {
+		selectColumns = append(selectColumns, column)
+	}
+
+	query := fmt.Sprintf(
+		`SELECT %s FROM %s.%s ORDER BY %s ASC`,
+		strings.Join(selectColumns, ", "),
+		schemaName,
+		tableName,
+		strings.Join(selectColumns, ", "),
+	)
+	rows, err := db.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanRowsToMaps(rows)
+}
+
+func (db *LocalPG) LoadRowsByPrimaryKeys(
+	ctx context.Context,
+	schemaName, tableName string,
+	pkColumns []string,
+	pkRows []map[string]interface{},
+) ([]map[string]interface{}, error) {
+	if len(pkRows) == 0 {
+		return []map[string]interface{}{}, nil
+	}
+	if len(pkColumns) == 1 {
+		return db.loadRowsBySinglePrimaryKey(ctx, schemaName, tableName, pkColumns[0], pkRows)
+	}
+	return db.loadRowsByCompositePrimaryKeys(ctx, schemaName, tableName, pkColumns, pkRows)
+}
+
+func (db *LocalPG) loadRowsBySinglePrimaryKey(
+	ctx context.Context,
+	schemaName, tableName, pkColumn string,
+	pkRows []map[string]interface{},
+) ([]map[string]interface{}, error) {
+	values := make([]interface{}, 0, len(pkRows))
+	for _, row := range pkRows {
+		values = append(values, row[pkColumn])
+	}
+
+	query := fmt.Sprintf(`SELECT * FROM %s.%s WHERE %s = ANY($1)`, schemaName, tableName, pkColumn)
+	rows, err := db.pool.Query(ctx, query, values)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanRowsToMaps(rows)
+}
+
+func (db *LocalPG) loadRowsByCompositePrimaryKeys(
+	ctx context.Context,
+	schemaName, tableName string,
+	pkColumns []string,
+	pkRows []map[string]interface{},
+) ([]map[string]interface{}, error) {
+	result := make([]map[string]interface{}, 0, len(pkRows))
+	for _, pkRow := range pkRows {
+		whereParts := make([]string, 0, len(pkColumns))
+		values := make([]interface{}, 0, len(pkColumns))
+		for index, column := range pkColumns {
+			whereParts = append(whereParts, fmt.Sprintf("%s = $%d", column, index+1))
+			values = append(values, pkRow[column])
+		}
+		query := fmt.Sprintf(
+			`SELECT * FROM %s.%s WHERE %s LIMIT 1`,
+			schemaName,
+			tableName,
+			strings.Join(whereParts, " AND "),
+		)
+		rows, err := db.pool.Query(ctx, query, values...)
+		if err != nil {
+			return nil, err
+		}
+		chunk, scanErr := scanRowsToMaps(rows)
+		rows.Close()
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result = append(result, chunk...)
+	}
+	return result, nil
+}
+
+func scanRowsToMaps(rows pgx.Rows) ([]map[string]interface{}, error) {
+	fieldDescriptions := rows.FieldDescriptions()
+	result := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		values, valuesErr := rows.Values()
+		if valuesErr != nil {
+			return nil, valuesErr
+		}
+		item := make(map[string]interface{}, len(values))
+		for index, field := range fieldDescriptions {
+			item[string(field.Name)] = values[index]
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }
 
 func (db *LocalPG) readPrimaryKeys(ctx context.Context, schemaName, tableName string) ([]string, error) {

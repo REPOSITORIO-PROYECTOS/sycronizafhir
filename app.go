@@ -30,6 +30,9 @@ type App struct {
 	bootstrapMu     sync.Mutex
 	bootstrapState  syncworker.BootstrapStatus
 	bootstrapActive bool
+	auditMu         sync.Mutex
+	auditActive     bool
+	lastAudit       syncworker.DataAuditReport
 }
 
 type ConfigSummary struct {
@@ -39,10 +42,37 @@ type ConfigSummary struct {
 	SourceSchema  string   `json:"source_schema"`
 	ExcludeTables []string `json:"exclude_tables"`
 	OutboundEvery string   `json:"outbound_every"`
+	AuditEvery    string   `json:"audit_every"`
 	RealtimeURL   string   `json:"realtime_url"`
 	Channel       string   `json:"channel"`
 	Schema        string   `json:"schema"`
 	Table         string   `json:"table"`
+}
+
+type SyncTablesConfigDTO struct {
+	EnabledTables          []string          `json:"enabled_tables"`
+	TableMappings          map[string]string `json:"table_mappings"`
+	AutoAuditIntervalHours int               `json:"auto_audit_interval_hours"`
+	AutoSyncOnAudit        bool              `json:"auto_sync_on_audit"`
+}
+
+type AvailableSyncTable struct {
+	Name        string `json:"name"`
+	RemoteName  string `json:"remote_name"`
+	PrimaryKeys []string `json:"primary_keys"`
+	Enabled     bool   `json:"enabled"`
+}
+
+type DataAuditActionResult struct {
+	Success bool                        `json:"success"`
+	Message string                      `json:"message"`
+	Report  syncworker.DataAuditReport  `json:"report"`
+}
+
+type SyncSelectedResult struct {
+	Success    bool   `json:"success"`
+	Message    string `json:"message"`
+	SyncedRows int    `json:"synced_rows"`
 }
 
 type LocalConnectionInput struct {
@@ -89,6 +119,209 @@ func (a *App) startup(ctx context.Context) {
 
 	a.runtime.AddLog("frontend conectado")
 	go a.resumeBootstrapIfNeeded()
+	a.loadPersistedAuditReport()
+}
+
+func (a *App) loadPersistedAuditReport() {
+	if a.queue == nil {
+		return
+	}
+	report, exists, err := syncworker.LoadAuditReport(context.Background(), a.queue)
+	if err != nil || !exists {
+		return
+	}
+	a.auditMu.Lock()
+	a.lastAudit = report
+	a.auditMu.Unlock()
+}
+
+func (a *App) GetSyncTablesConfig() SyncTablesConfigDTO {
+	cfg, err := config.LoadSyncTablesConfig()
+	if err != nil {
+		return toSyncTablesDTO(config.DefaultSyncTablesConfig())
+	}
+	return toSyncTablesDTO(cfg)
+}
+
+func (a *App) SaveSyncTablesConfig(input SyncTablesConfigDTO) SyncTablesConfigDTO {
+	cfg := config.SyncTablesConfig{
+		EnabledTables:          input.EnabledTables,
+		TableMappings:          input.TableMappings,
+		AutoAuditIntervalHours: input.AutoAuditIntervalHours,
+		AutoSyncOnAudit:        input.AutoSyncOnAudit,
+	}
+	if saveErr := config.SaveSyncTablesConfig(cfg); saveErr != nil {
+		a.runtime.AddLog("sync tables config save failed: " + saveErr.Error())
+	}
+	return toSyncTablesDTO(cfg)
+}
+
+func (a *App) ListAvailableSyncTables() ([]AvailableSyncTable, error) {
+	if a.cfg == nil {
+		return nil, errors.New("config no cargada")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	localPG, remotePG, err := a.openReconcileConnections(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer localPG.Close()
+	defer remotePG.Close()
+
+	syncCfg, _ := config.LoadSyncTablesConfig()
+	service := syncworker.NewReconcileService(localPG, remotePG, a.cfg.SourceSchema, a.cfg.ExcludeTables, a.runtime)
+	tables, err := service.ListAvailableTables(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]AvailableSyncTable, 0, len(tables))
+	for _, table := range tables {
+		result = append(result, AvailableSyncTable{
+			Name:        table.Name,
+			RemoteName:  syncCfg.ResolveRemoteTable(table.Name),
+			PrimaryKeys: append([]string{}, table.PrimaryKeys...),
+			Enabled:     syncCfg.IsEnabled(table.Name),
+		})
+	}
+	return result, nil
+}
+
+func (a *App) RunDataAudit(applySync bool) DataAuditActionResult {
+	if a.cfg == nil {
+		return DataAuditActionResult{Success: false, Message: "config no cargada"}
+	}
+
+	a.auditMu.Lock()
+	if a.auditActive {
+		a.auditMu.Unlock()
+		return DataAuditActionResult{Success: false, Message: "auditoria ya en curso"}
+	}
+	a.auditActive = true
+	a.auditMu.Unlock()
+
+	defer func() {
+		a.auditMu.Lock()
+		a.auditActive = false
+		a.auditMu.Unlock()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	localPG, remotePG, err := a.openReconcileConnections(ctx)
+	if err != nil {
+		return DataAuditActionResult{Success: false, Message: err.Error()}
+	}
+	defer localPG.Close()
+	defer remotePG.Close()
+
+	syncCfg, _ := config.LoadSyncTablesConfig()
+	service := syncworker.NewReconcileService(localPG, remotePG, a.cfg.SourceSchema, a.cfg.ExcludeTables, a.runtime)
+	report, err := service.RunAudit(ctx, syncCfg, "manual", applySync)
+	if err != nil {
+		return DataAuditActionResult{Success: false, Message: err.Error()}
+	}
+
+	if a.queue != nil {
+		_ = syncworker.SaveAuditReport(ctx, a.queue, report)
+	}
+
+	a.auditMu.Lock()
+	a.lastAudit = report
+	a.auditMu.Unlock()
+
+	return DataAuditActionResult{
+		Success: true,
+		Message: report.Summary,
+		Report:  report,
+	}
+}
+
+func (a *App) GetLastDataAudit() syncworker.DataAuditReport {
+	a.auditMu.Lock()
+	memReport := a.lastAudit
+	a.auditMu.Unlock()
+
+	if !memReport.AuditedAt.IsZero() {
+		return memReport
+	}
+
+	if a.queue == nil {
+		return syncworker.DataAuditReport{}
+	}
+
+	report, exists, err := syncworker.LoadAuditReport(context.Background(), a.queue)
+	if err != nil || !exists {
+		return syncworker.DataAuditReport{}
+	}
+	return report
+}
+
+func (a *App) SyncSelectedTables(tableNames []string) SyncSelectedResult {
+	if a.cfg == nil {
+		return SyncSelectedResult{Success: false, Message: "config no cargada"}
+	}
+	if len(tableNames) == 0 {
+		return SyncSelectedResult{Success: false, Message: "selecciona al menos una tabla"}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	localPG, remotePG, err := a.openReconcileConnections(ctx)
+	if err != nil {
+		return SyncSelectedResult{Success: false, Message: err.Error()}
+	}
+	defer localPG.Close()
+	defer remotePG.Close()
+
+	syncCfg, _ := config.LoadSyncTablesConfig()
+	service := syncworker.NewReconcileService(localPG, remotePG, a.cfg.SourceSchema, a.cfg.ExcludeTables, a.runtime)
+	synced, err := service.SyncSelectedTables(ctx, syncCfg, tableNames)
+	if err != nil {
+		return SyncSelectedResult{Success: false, Message: err.Error(), SyncedRows: synced}
+	}
+
+	message := fmt.Sprintf("Sincronizadas %d filas en %d tabla(s)", synced, len(tableNames))
+	a.runtime.AddLog(message)
+	return SyncSelectedResult{Success: true, Message: message, SyncedRows: synced}
+}
+
+func (a *App) openReconcileConnections(ctx context.Context) (*db.LocalPG, *supabase.PGClient, error) {
+	resolution, err := db.ResolveLocalPostgresSource(ctx, *a.cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	localPG, err := db.NewLocalPG(ctx, resolution.Selected.DSN)
+	if err != nil {
+		return nil, nil, fmt.Errorf("conexion local: %w", err)
+	}
+
+	remotePG, err := supabase.NewPGClient(ctx, a.cfg.SupabaseDBDSN())
+	if err != nil {
+		localPG.Close()
+		return nil, nil, fmt.Errorf("conexion supabase: %w", err)
+	}
+
+	return localPG, remotePG, nil
+}
+
+func toSyncTablesDTO(cfg config.SyncTablesConfig) SyncTablesConfigDTO {
+	mappings := map[string]string{}
+	for key, value := range cfg.TableMappings {
+		mappings[key] = value
+	}
+	return SyncTablesConfigDTO{
+		EnabledTables:          append([]string{}, cfg.EnabledTables...),
+		TableMappings:          mappings,
+		AutoAuditIntervalHours: cfg.AutoAuditIntervalHours,
+		AutoSyncOnAudit:        cfg.AutoSyncOnAudit,
+	}
 }
 
 func (a *App) shutdown(ctx context.Context) {
@@ -129,6 +362,7 @@ func (a *App) GetConfigSummary() ConfigSummary {
 		SourceSchema:  a.cfg.SourceSchema,
 		ExcludeTables: append([]string{}, a.cfg.ExcludeTables...),
 		OutboundEvery: a.cfg.OutboundInterval.String(),
+		AuditEvery:    a.cfg.AuditInterval.String(),
 		RealtimeURL:   redactSensitive(a.cfg.SupabaseRealtimeURL),
 		Channel:       a.cfg.RealtimeChannel,
 		Schema:        a.cfg.RealtimeSchema,

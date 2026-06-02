@@ -70,6 +70,163 @@ func (c *PGClient) Ping(ctx context.Context) error {
 	return c.pool.Ping(ctx)
 }
 
+func (c *PGClient) TableExists(ctx context.Context, schemaName, tableName string) (bool, error) {
+	if !safeIdentifierRegex.MatchString(schemaName) || !safeIdentifierRegex.MatchString(tableName) {
+		return false, fmt.Errorf("invalid table identifier %s.%s", schemaName, tableName)
+	}
+	var exists bool
+	err := c.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.tables
+			WHERE table_schema = $1
+			  AND table_name = $2
+			  AND table_type = 'BASE TABLE'
+		)`, schemaName, tableName).Scan(&exists)
+	return exists, err
+}
+
+func (c *PGClient) CountTableRows(ctx context.Context, schemaName, tableName string) (int64, error) {
+	if !safeIdentifierRegex.MatchString(schemaName) || !safeIdentifierRegex.MatchString(tableName) {
+		return 0, fmt.Errorf("invalid table identifier %s.%s", schemaName, tableName)
+	}
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM %s.%s`, quoteIdentifier(schemaName), quoteIdentifier(tableName))
+	var total int64
+	if err := c.pool.QueryRow(ctx, query).Scan(&total); err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func (c *PGClient) ReadTableColumns(ctx context.Context, schemaName, tableName string) (map[string]bool, error) {
+	return c.readTableColumns(ctx, schemaName, tableName)
+}
+
+func (c *PGClient) LoadPrimaryKeyRows(ctx context.Context, schemaName, tableName string, pkColumns []string) ([]map[string]interface{}, error) {
+	if !safeIdentifierRegex.MatchString(schemaName) || !safeIdentifierRegex.MatchString(tableName) {
+		return nil, fmt.Errorf("invalid table identifier %s.%s", schemaName, tableName)
+	}
+	if len(pkColumns) == 0 {
+		return nil, fmt.Errorf("primary key columns required for %s.%s", schemaName, tableName)
+	}
+	for _, column := range pkColumns {
+		if !safeIdentifierRegex.MatchString(column) {
+			return nil, fmt.Errorf("invalid pk column %s", column)
+		}
+	}
+
+	selectParts := make([]string, 0, len(pkColumns))
+	for _, column := range pkColumns {
+		selectParts = append(selectParts, quoteIdentifier(column))
+	}
+
+	query := fmt.Sprintf(
+		`SELECT %s FROM %s.%s ORDER BY %s ASC`,
+		strings.Join(selectParts, ", "),
+		quoteIdentifier(schemaName),
+		quoteIdentifier(tableName),
+		strings.Join(selectParts, ", "),
+	)
+	rows, err := c.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanRemoteRows(rows)
+}
+
+func (c *PGClient) LoadRowsByPrimaryKeys(
+	ctx context.Context,
+	schemaName, tableName string,
+	pkColumns []string,
+	pkRows []map[string]interface{},
+) ([]map[string]interface{}, error) {
+	if len(pkRows) == 0 {
+		return []map[string]interface{}{}, nil
+	}
+	if len(pkColumns) == 1 {
+		return c.loadRowsBySinglePrimaryKey(ctx, schemaName, tableName, pkColumns[0], pkRows)
+	}
+	return c.loadRowsByCompositePrimaryKeys(ctx, schemaName, tableName, pkColumns, pkRows)
+}
+
+func (c *PGClient) loadRowsBySinglePrimaryKey(
+	ctx context.Context,
+	schemaName, tableName, pkColumn string,
+	pkRows []map[string]interface{},
+) ([]map[string]interface{}, error) {
+	values := make([]interface{}, 0, len(pkRows))
+	for _, row := range pkRows {
+		values = append(values, row[pkColumn])
+	}
+
+	query := fmt.Sprintf(
+		`SELECT * FROM %s.%s WHERE %s = ANY($1)`,
+		quoteIdentifier(schemaName),
+		quoteIdentifier(tableName),
+		quoteIdentifier(pkColumn),
+	)
+	rows, err := c.pool.Query(ctx, query, values)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanRemoteRows(rows)
+}
+
+func (c *PGClient) loadRowsByCompositePrimaryKeys(
+	ctx context.Context,
+	schemaName, tableName string,
+	pkColumns []string,
+	pkRows []map[string]interface{},
+) ([]map[string]interface{}, error) {
+	result := make([]map[string]interface{}, 0, len(pkRows))
+	for _, pkRow := range pkRows {
+		whereParts := make([]string, 0, len(pkColumns))
+		values := make([]interface{}, 0, len(pkColumns))
+		for index, column := range pkColumns {
+			whereParts = append(whereParts, fmt.Sprintf("%s = $%d", quoteIdentifier(column), index+1))
+			values = append(values, pkRow[column])
+		}
+		query := fmt.Sprintf(
+			`SELECT * FROM %s.%s WHERE %s LIMIT 1`,
+			quoteIdentifier(schemaName),
+			quoteIdentifier(tableName),
+			strings.Join(whereParts, " AND "),
+		)
+		rows, err := c.pool.Query(ctx, query, values...)
+		if err != nil {
+			return nil, err
+		}
+		chunk, scanErr := scanRemoteRows(rows)
+		rows.Close()
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result = append(result, chunk...)
+	}
+	return result, nil
+}
+
+func scanRemoteRows(rows pgx.Rows) ([]map[string]interface{}, error) {
+	fieldDescriptions := rows.FieldDescriptions()
+	result := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		values, valuesErr := rows.Values()
+		if valuesErr != nil {
+			return nil, valuesErr
+		}
+		item := make(map[string]interface{}, len(values))
+		for index, field := range fieldDescriptions {
+			item[string(field.Name)] = values[index]
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
 func (c *PGClient) UpsertRows(ctx context.Context, schemaName, tableName string, rows []map[string]interface{}, conflictColumns []string) error {
 	if len(rows) == 0 {
 		return nil

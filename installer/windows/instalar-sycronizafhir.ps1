@@ -90,6 +90,11 @@ function Install-App {
         Copy-Item $docSource (Join-Path $InstallDir "ERRORES_MONITOR.md") -Force
     }
 
+    $versionSource = Join-Path $SourceDir "version.txt"
+    if (Test-Path $versionSource) {
+        Copy-Item $versionSource (Join-Path $InstallDir "version.txt") -Force
+    }
+
     return $targetExe
 }
 

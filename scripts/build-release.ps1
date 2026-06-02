@@ -28,7 +28,9 @@ New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
 Write-Step "Compilando frontend + binario principal con wails build"
 Push-Location $root
 try {
-    & $wails build -platform windows/amd64 -trimpath -ldflags "-s -w" -clean
+    $ldProductVersion = (Get-Content (Join-Path $root "VERSION") -Raw).Trim()
+    $ldflags = "-s -w -X sycronizafhir/internal/updater.productVersion=$ldProductVersion"
+    & $wails build -platform windows/amd64 -trimpath -ldflags $ldflags -clean
     if ($LASTEXITCODE -ne 0) { throw "wails build fallo (exit $LASTEXITCODE)" }
 }
 finally {
@@ -39,6 +41,12 @@ if (-not (Test-Path $wailsBuildOutput)) {
     throw "No se encontro el binario esperado en $wailsBuildOutput"
 }
 Copy-Item $wailsBuildOutput (Join-Path $packageDir $appExeName) -Force
+
+$productVersion = (Get-Content (Join-Path $root "VERSION") -Raw).Trim()
+if ($productVersion -notmatch '^v') {
+    $productVersion = "v$productVersion"
+}
+Set-Content -Path (Join-Path $packageDir "version.txt") -Value $productVersion -Encoding UTF8 -NoNewline
 
 Write-Step "Compilando launcher del setup"
 Push-Location $root

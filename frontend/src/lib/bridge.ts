@@ -6,6 +6,13 @@ import type {
   LocalConnectionResult,
   ScanResult,
   Snapshot,
+  UpdateApplyResult,
+  UpdateStatus,
+  SyncTablesConfig,
+  AvailableSyncTable,
+  DataAuditReport,
+  DataAuditActionResult,
+  SyncSelectedResult,
 } from "@/types/domain";
 
 interface AppBindings {
@@ -27,6 +34,14 @@ interface AppBindings {
   ResolveDatabaseSource: () => Promise<DatabaseSourceResult>;
   StartInitialFullLoad: () => Promise<DatabaseSourceResult>;
   GetInitialLoadStatus: () => Promise<BootstrapStatus>;
+  CheckForUpdate: () => Promise<UpdateStatus>;
+  ApplyUpdate: () => Promise<UpdateApplyResult>;
+  GetSyncTablesConfig: () => Promise<SyncTablesConfig>;
+  SaveSyncTablesConfig: (input: SyncTablesConfig) => Promise<SyncTablesConfig>;
+  ListAvailableSyncTables: () => Promise<AvailableSyncTable[]>;
+  RunDataAudit: (applySync: boolean) => Promise<DataAuditActionResult>;
+  GetLastDataAudit: () => Promise<DataAuditReport>;
+  SyncSelectedTables: (tableNames: string[]) => Promise<SyncSelectedResult>;
 }
 
 interface WailsRuntime {
@@ -104,6 +119,7 @@ const mockConfig: ConfigSummary = {
   source_schema: "public",
   exclude_tables: ["sync_buzon_pedidos"],
   outbound_every: "60s",
+  audit_every: "6h0m0s",
   realtime_url: "wss://db.supabase.co/realtime/v1",
   channel: "realtime:public:pedidos",
   schema: "public",
@@ -156,6 +172,49 @@ const mockBootstrapStatus: BootstrapStatus = {
   chunk_size: 200,
   completed_table: 0,
   total_tables: 0,
+};
+
+const mockSyncConfig: SyncTablesConfig = {
+  enabled_tables: ["clientes", "productos"],
+  table_mappings: { articulos: "productos" },
+  auto_audit_interval_hours: 6,
+  auto_sync_on_audit: true,
+};
+
+const mockAvailableTables: AvailableSyncTable[] = [
+  {
+    name: "clientes",
+    remote_name: "clientes",
+    primary_keys: ["clien_id"],
+    enabled: true,
+  },
+  {
+    name: "productos",
+    remote_name: "productos",
+    primary_keys: ["prod_id"],
+    enabled: true,
+  },
+];
+
+const mockAuditReport: DataAuditReport = {
+  audited_at: new Date().toISOString(),
+  trigger: "mock",
+  summary: "Auditoria simulada: 0 faltantes, 0 cambiadas",
+  auto_sync_applied: false,
+  synced_rows: 0,
+  tables: [
+    {
+      local_table: "clientes",
+      remote_table: "clientes",
+      local_count: 1426,
+      remote_count: 1426,
+      missing_in_remote: 0,
+      changed: 0,
+      in_sync: 1426,
+      status: "ok",
+      selected: true,
+    },
+  ],
 };
 
 export const bridge = {
@@ -255,6 +314,73 @@ export const bridge = {
       return wailsWindow.go!.main!.App!.GetInitialLoadStatus();
     }
     return mockBootstrapStatus;
+  },
+  async checkForUpdate(): Promise<UpdateStatus> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.CheckForUpdate();
+    }
+    return {
+      available: false,
+      current_version: "dev",
+      latest_version: "dev",
+      can_apply: false,
+      message: "Comprobacion de actualizaciones solo en la app instalada.",
+    };
+  },
+  async applyUpdate(): Promise<UpdateApplyResult> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.ApplyUpdate();
+    }
+    return {
+      success: false,
+      message: "Actualizacion no disponible en modo navegador.",
+    };
+  },
+  async getSyncTablesConfig(): Promise<SyncTablesConfig> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.GetSyncTablesConfig();
+    }
+    return mockSyncConfig;
+  },
+  async saveSyncTablesConfig(input: SyncTablesConfig): Promise<SyncTablesConfig> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.SaveSyncTablesConfig(input);
+    }
+    return input;
+  },
+  async listAvailableSyncTables(): Promise<AvailableSyncTable[]> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.ListAvailableSyncTables();
+    }
+    return mockAvailableTables;
+  },
+  async runDataAudit(applySync: boolean): Promise<DataAuditActionResult> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.RunDataAudit(applySync);
+    }
+    return {
+      success: true,
+      message: applySync
+        ? "Auditoria mock con sync simulado"
+        : "Auditoria mock completada",
+      report: mockAuditReport,
+    };
+  },
+  async getLastDataAudit(): Promise<DataAuditReport> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.GetLastDataAudit();
+    }
+    return mockAuditReport;
+  },
+  async syncSelectedTables(tableNames: string[]): Promise<SyncSelectedResult> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.SyncSelectedTables(tableNames);
+    }
+    return {
+      success: true,
+      message: `Sync mock para ${tableNames.length} tabla(s)`,
+      synced_rows: 0,
+    };
   },
   on(event: string, handler: (payload: unknown) => void): () => void {
     if (!isWailsAvailable()) {

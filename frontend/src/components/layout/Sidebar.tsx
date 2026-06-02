@@ -6,6 +6,7 @@ import {
   Radar,
   ScrollText,
   Activity,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import packageJson from "../../../package.json";
@@ -14,6 +15,7 @@ const NAV = [
   { to: "/", label: "Panel", icon: LayoutDashboard },
   { to: "/componentes", label: "Componentes", icon: Boxes },
   { to: "/conexiones", label: "Conexiones", icon: PlugZap },
+  { to: "/sincronizacion", label: "Sincronización", icon: RefreshCw },
   { to: "/escaneos", label: "Escaneos", icon: Radar },
   { to: "/logs", label: "Logs", icon: ScrollText },
 ] as const;

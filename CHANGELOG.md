@@ -3,6 +3,16 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.5.0] - 2026-06-02
+
+### Agregado
+
+- Módulo **Sincronización**: compara local vs Supabase por tabla (conteos, faltantes, cambios por hash de contenido).
+- Selector de tablas habilitadas persistido en `%APPDATA%\sycronizafhir\sync-tables.json` (default: `clientes`, `productos`; mapeo `articulos` → `productos`).
+- Botones **Auditar ahora**, **Auditar y subir diffs** y **Subir seleccionadas**.
+- Worker de **auditoría automática cada 6 h** (`SYNC_AUDIT_INTERVAL_HOURS`, default 6) con auto-sync opcional.
+- Errores de upsert en `clientes`/`productos`/`articulos` indican que requieren revisión de detalle; otras tablas fallan directo.
+
 ## [1.4.7] - 2026-06-01
 
 ### Corregido
