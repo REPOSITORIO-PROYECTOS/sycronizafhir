@@ -3,6 +3,12 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.5.2] - 2026-06-02
+
+### Corregido
+
+- Upsert a Supabase: columnas array (`integer[]`, `text[]`) leídas como `[]interface{}` ya se normalizan antes del INSERT (evita `cannot find encode plan` / OID 0).
+
 ## [1.5.1] - 2026-06-02
 
 ### Corregido
