@@ -167,8 +167,22 @@ func (c *PGClient) loadRowsBySinglePrimaryKey(
 		quoteIdentifier(tableName),
 		quoteIdentifier(pkColumn),
 	)
-	rows, err := c.pool.Query(ctx, query, values)
+	// #region agent log
+	agentDebugLog("pg_upsert.go:loadRowsBySinglePrimaryKey", "ANY($1) query params", "E", map[string]interface{}{
+		"table":   tableName,
+		"pkColumn": pkColumn,
+		"valuesType": fmt.Sprintf("%T", values),
+		"valuesLen": len(values),
+	})
+	// #endregion
+	rows, err := c.pool.Query(ctx, query, normalizeParamValue(values))
 	if err != nil {
+		// #region agent log
+		agentDebugLog("pg_upsert.go:loadRowsBySinglePrimaryKey", "ANY($1) query failed", "E", map[string]interface{}{
+			"table": tableName,
+			"error": err.Error(),
+		})
+		// #endregion
 		return nil, err
 	}
 	defer rows.Close()
@@ -222,7 +236,7 @@ func scanRemoteRows(rows pgx.Rows) ([]map[string]interface{}, error) {
 		for index, field := range fieldDescriptions {
 			item[string(field.Name)] = values[index]
 		}
-		result = append(result, item)
+		result = append(result, NormalizeRowMap(item))
 	}
 	return result, rows.Err()
 }
@@ -230,6 +244,9 @@ func scanRemoteRows(rows pgx.Rows) ([]map[string]interface{}, error) {
 func (c *PGClient) UpsertRows(ctx context.Context, schemaName, tableName string, rows []map[string]interface{}, conflictColumns []string) error {
 	if len(rows) == 0 {
 		return nil
+	}
+	for index := range rows {
+		rows[index] = NormalizeRowMap(rows[index])
 	}
 	if !safeIdentifierRegex.MatchString(schemaName) || !safeIdentifierRegex.MatchString(tableName) {
 		return fmt.Errorf("invalid target identifier %s.%s", schemaName, tableName)
@@ -415,7 +432,19 @@ func (c *PGClient) upsertMultiRowBatch(ctx context.Context, schemaName, tableNam
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramIndex))
 			paramIndex++
 			if value, ok := row[name]; ok {
-				values = append(values, normalizeParamValue(value))
+				normalized := normalizeParamValue(value)
+				// #region agent log
+				if isSliceLike(value) {
+					agentDebugLog("pg_upsert.go:upsertMultiRowBatch", "upsert slice column", "A", map[string]interface{}{
+						"table":    tableName,
+						"column":   name,
+						"rawType":  fmt.Sprintf("%T", value),
+						"normType": fmt.Sprintf("%T", normalized),
+						"len":      sliceLen(value),
+					})
+				}
+				// #endregion
+				values = append(values, normalized)
 			} else {
 				values = append(values, nil)
 			}
@@ -434,6 +463,16 @@ func (c *PGClient) upsertMultiRowBatch(ctx context.Context, schemaName, tableNam
 	)
 
 	_, err := c.pool.Exec(ctx, query, values...)
+	// #region agent log
+	if err != nil {
+		agentDebugLog("pg_upsert.go:upsertMultiRowBatch", "upsert exec failed", "A", map[string]interface{}{
+			"table":      tableName,
+			"rowCount":   len(rows),
+			"columnCount": len(columnNames),
+			"error":      err.Error(),
+		})
+	}
+	// #endregion
 	return err
 }
 

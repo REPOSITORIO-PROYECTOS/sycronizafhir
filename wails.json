@@ -12,7 +12,7 @@
   "info": {
     "companyName": "Agencia TA, Soluciones Empresariales",
     "productName": "sycronizafhir",
-    "productVersion": "1.5.2",
+    "productVersion": "1.5.3",
     "copyright": "Copyright Agencia TA",
     "comments": "Sincronizacion bidireccional Postgres local <-> Supabase"
   }

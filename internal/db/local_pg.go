@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"sycronizafhir/internal/models"
+	"sycronizafhir/internal/supabase"
 )
 
 type LocalPG struct {
@@ -222,7 +223,7 @@ func (db *LocalPG) LoadUpdatedRows(ctx context.Context, schemaName, tableName st
 			item[string(field.Name)] = values[index]
 		}
 
-		result = append(result, item)
+		result = append(result, supabase.NormalizeRowMap(item))
 	}
 
 	return result, rows.Err()
@@ -290,7 +291,7 @@ func (db *LocalPG) LoadTableRowsChunk(ctx context.Context, schemaName, tableName
 		for index, field := range fieldDescriptions {
 			item[string(field.Name)] = values[index]
 		}
-		result = append(result, item)
+		result = append(result, supabase.NormalizeRowMap(item))
 	}
 
 	return result, rows.Err()
@@ -376,7 +377,7 @@ func (db *LocalPG) loadRowsBySinglePrimaryKey(
 	}
 
 	query := fmt.Sprintf(`SELECT * FROM %s.%s WHERE %s = ANY($1)`, schemaName, tableName, pkColumn)
-	rows, err := db.pool.Query(ctx, query, values)
+	rows, err := db.pool.Query(ctx, query, supabase.NormalizeParamValue(values))
 	if err != nil {
 		return nil, err
 	}
@@ -431,7 +432,7 @@ func scanRowsToMaps(rows pgx.Rows) ([]map[string]interface{}, error) {
 		for index, field := range fieldDescriptions {
 			item[string(field.Name)] = values[index]
 		}
-		result = append(result, item)
+		result = append(result, supabase.NormalizeRowMap(item))
 	}
 	return result, rows.Err()
 }
