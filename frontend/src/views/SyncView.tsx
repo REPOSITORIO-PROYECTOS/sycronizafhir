@@ -8,6 +8,8 @@ import {
   AlertTriangle,
   Database,
   ImageIcon,
+  Loader2,
+  XCircle,
 } from "lucide-react";
 
 import { Topbar } from "@/components/layout/Topbar";
@@ -15,7 +17,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { bridge } from "@/lib/bridge";
-import type { AvailableSyncTable, TableAuditResult } from "@/types/domain";
+import type {
+  AvailableSyncTable,
+  PendingProductImage,
+  TableAuditResult,
+} from "@/types/domain";
 
 function statusBadge(status: string) {
   switch (status) {
@@ -29,6 +35,17 @@ function statusBadge(status: string) {
       return <Badge variant="outline">Omitida</Badge>;
     default:
       return <Badge variant="muted">{status}</Badge>;
+  }
+}
+
+function imageStatusBadge(status: PendingProductImage["file_status"]) {
+  switch (status) {
+    case "ready":
+      return <Badge className="bg-success/20 text-success">Listo</Badge>;
+    case "missing":
+      return <Badge className="bg-warning/20 text-warning">Archivo no encontrado</Badge>;
+    default:
+      return <Badge variant="destructive">Ruta inválida</Badge>;
   }
 }
 
@@ -60,6 +77,7 @@ export function SyncView() {
   const queryClient = useQueryClient();
   const [selectedTables, setSelectedTables] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+  const [imageFeedback, setImageFeedback] = useState<{ ok: boolean; text: string } | null>(null);
 
   const { data: configSummary } = useQuery({
     queryKey: ["config-summary"],
@@ -81,18 +99,6 @@ export function SyncView() {
     queryFn: () => bridge.getLastDataAudit(),
     refetchInterval: 15000,
   });
-
-  const { data: imageSyncStatus, refetch: refetchImageStatus } = useQuery({
-    queryKey: ["image-sync-status"],
-    queryFn: () => bridge.getImageSyncStatus(),
-    refetchInterval: 15000,
-  });
-
-  useEffect(() => {
-    if (!availableTables) return;
-    const enabled = availableTables.filter((t) => t.enabled).map((t) => t.name);
-    setSelectedTables(enabled);
-  }, [availableTables]);
 
   const saveConfigMutation = useMutation({
     mutationFn: (enabled: string[]) =>
@@ -129,11 +135,47 @@ export function SyncView() {
   const imageSyncMutation = useMutation({
     mutationFn: () => bridge.syncProductImagesNow(true),
     onSuccess: async (result) => {
-      setFeedback({ ok: result.success, text: result.message });
-      await refetchImageStatus();
+      const stats = result.stats;
+      const detail = stats
+        ? `Subidas: ${stats.uploaded}, omitidas: ${stats.skipped}, fallidas: ${stats.failed}.`
+        : "";
+      setImageFeedback({
+        ok: result.success,
+        text: result.success
+          ? `Subida completada. ${detail} ${result.message}`.trim()
+          : `${result.message}${detail ? ` ${detail}` : ""}`,
+      });
+      await Promise.all([
+        refetchImageStatus(),
+        refetchPendingImages(),
+        queryClient.invalidateQueries({ queryKey: ["pending-product-images"] }),
+      ]);
     },
-    onError: (error: Error) => setFeedback({ ok: false, text: error.message }),
+    onError: (error: Error) =>
+      setImageFeedback({ ok: false, text: error.message }),
   });
+
+  const { data: imageSyncStatus, refetch: refetchImageStatus } = useQuery({
+    queryKey: ["image-sync-status"],
+    queryFn: () => bridge.getImageSyncStatus(),
+    refetchInterval: imageSyncMutation.isPending ? 2000 : 15000,
+  });
+
+  const {
+    data: pendingImages,
+    isLoading: loadingPendingImages,
+    refetch: refetchPendingImages,
+  } = useQuery({
+    queryKey: ["pending-product-images"],
+    queryFn: () => bridge.getPendingProductImages(),
+    refetchInterval: imageSyncMutation.isPending ? 3000 : 30000,
+  });
+
+  useEffect(() => {
+    if (!availableTables) return;
+    const enabled = availableTables.filter((t) => t.enabled).map((t) => t.name);
+    setSelectedTables(enabled);
+  }, [availableTables]);
 
   const toggleTable = (name: string) => {
     setSelectedTables((prev) => {
@@ -234,10 +276,11 @@ export function SyncView() {
               prod_imagen en la nube con URL pública.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-4">
             <div className="text-sm text-muted-foreground space-y-1">
               <p>
-                Bucket: {configSummary?.storage_bucket_productos ?? "productos"} · Intervalo:{" "}
+                Base local: {pendingImages?.local_base ?? "—"} · Bucket:{" "}
+                {configSummary?.storage_bucket_productos ?? "productos"} · Intervalo:{" "}
                 {configSummary?.image_sync_every ?? "5m0s"}
               </p>
               {imageSyncStatus?.finished_at ? (
@@ -250,15 +293,131 @@ export function SyncView() {
                 <p>Último ciclo: pendiente</p>
               )}
             </div>
-            <Button
-              disabled={
-                imageSyncMutation.isPending || configSummary?.image_sync_enabled === false
-              }
-              onClick={() => imageSyncMutation.mutate()}
-            >
-              <Upload className="mr-2 h-4 w-4" />
-              Subir imágenes ahora
-            </Button>
+
+            {loadingPendingImages ? (
+              <p className="text-sm text-muted-foreground flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Cargando pendientes...
+              </p>
+            ) : (
+              <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-3 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium">Pendientes de subir:</span>
+                  <Badge variant={pendingImages?.total ? "default" : "muted"}>
+                    {pendingImages?.total ?? 0} producto(s)
+                  </Badge>
+                  {pendingImages?.ready ? (
+                    <Badge className="bg-success/20 text-success">
+                      {pendingImages.ready} listo(s)
+                      {pendingImages.total > pendingImages.items.length ? " (muestra)" : ""}
+                    </Badge>
+                  ) : null}
+                  {pendingImages?.missing ? (
+                    <Badge className="bg-warning/20 text-warning">
+                      {pendingImages.missing} sin archivo
+                      {pendingImages.total > pendingImages.items.length ? " (muestra)" : ""}
+                    </Badge>
+                  ) : null}
+                  {pendingImages?.invalid ? (
+                    <Badge variant="destructive">
+                      {pendingImages.invalid} ruta inválida
+                      {pendingImages.total > pendingImages.items.length ? " (muestra)" : ""}
+                    </Badge>
+                  ) : null}
+                  {pendingImages?.queued_retry ? (
+                    <Badge variant="outline">{pendingImages.queued_retry} en cola de reintento</Badge>
+                  ) : null}
+                </div>
+                {!pendingImages?.total ? (
+                  <p className="text-sm text-success flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4" />
+                    No hay imágenes locales pendientes de subir.
+                  </p>
+                ) : null}
+              </div>
+            )}
+
+            {pendingImages?.items?.length ? (
+              <div className="overflow-x-auto rounded-lg border border-border/60">
+                <table className="w-full min-w-[640px] text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-border/60 text-xs uppercase tracking-wider text-muted-foreground">
+                      <th className="px-3 py-2">Producto</th>
+                      <th className="px-3 py-2">Ruta local (prod_imagen)</th>
+                      <th className="px-3 py-2">Estado archivo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingImages.items.map((item) => (
+                      <tr key={item.prod_id} className="border-b border-border/40">
+                        <td className="px-3 py-2 font-mono">{item.prod_id}</td>
+                        <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
+                          {item.prod_imagen}
+                        </td>
+                        <td className="px-3 py-2">{imageStatusBadge(item.file_status)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {pendingImages.total > pendingImages.items.length ? (
+                  <p className="px-3 py-2 text-xs text-muted-foreground border-t border-border/40">
+                    Mostrando {pendingImages.items.length} de {pendingImages.total} pendientes.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {imageSyncMutation.isPending ? (
+              <div className="rounded-lg border border-info/40 bg-info/10 px-3 py-2 text-sm text-info flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                Subiendo imágenes a Supabase Storage… Esto puede tardar según la cantidad de archivos.
+              </div>
+            ) : null}
+
+            {imageFeedback ? (
+              <div
+                className={`rounded-lg border px-3 py-2 text-sm flex items-start gap-2 ${
+                  imageFeedback.ok
+                    ? "border-success/40 bg-success/10 text-success"
+                    : "border-destructive/40 bg-destructive/10 text-destructive"
+                }`}
+              >
+                {imageFeedback.ok ? (
+                  <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+                ) : (
+                  <XCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                )}
+                <span>{imageFeedback.text}</span>
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                disabled={
+                  imageSyncMutation.isPending || configSummary?.image_sync_enabled === false
+                }
+                onClick={() => {
+                  setImageFeedback(null);
+                  imageSyncMutation.mutate();
+                }}
+              >
+                {imageSyncMutation.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="mr-2 h-4 w-4" />
+                )}
+                {imageSyncMutation.isPending ? "Subiendo imágenes..." : "Subir imágenes ahora"}
+              </Button>
+              <Button
+                variant="outline"
+                size="default"
+                disabled={loadingPendingImages || imageSyncMutation.isPending}
+                onClick={() => refetchPendingImages()}
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Actualizar pendientes
+              </Button>
+            </div>
           </CardContent>
         </Card>
 

@@ -235,6 +235,46 @@ func (db *LocalPG) LoadUpdatedRows(ctx context.Context, schemaName, tableName st
 	return result, rows.Err()
 }
 
+func (db *LocalPG) CountProductImageCandidates(
+	ctx context.Context,
+	schemaName string,
+	since time.Time,
+) (int64, error) {
+	if !safeIdentifierPattern.MatchString(schemaName) {
+		return 0, fmt.Errorf("invalid schema name: %s", schemaName)
+	}
+
+	isDateColumn, err := db.isFechaModificacionDate(ctx, schemaName, "productos")
+	if err != nil {
+		return 0, err
+	}
+
+	query := fmt.Sprintf(`
+		SELECT COUNT(*)
+		FROM %s.productos
+		WHERE prod_imagen IS NOT NULL
+		  AND BTRIM(prod_imagen::text) <> ''
+		  AND LOWER(BTRIM(prod_imagen::text)) NOT LIKE 'http://%%'
+		  AND LOWER(BTRIM(prod_imagen::text)) NOT LIKE 'https://%%'
+	`, schemaName)
+
+	args := make([]interface{}, 0, 1)
+	if !since.IsZero() {
+		if isDateColumn {
+			query += " AND fecha_modificacion >= $1::date"
+		} else {
+			query += " AND fecha_modificacion > $1"
+		}
+		args = append(args, since)
+	}
+
+	var total int64
+	if err = db.pool.QueryRow(ctx, query, args...).Scan(&total); err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
 func (db *LocalPG) LoadProductImageCandidates(
 	ctx context.Context,
 	schemaName string,

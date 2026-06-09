@@ -146,6 +146,22 @@ func (q *QueueSQLite) Enqueue(ctx context.Context, direction, payloadJSON string
 	})
 }
 
+func (q *QueueSQLite) CountByDirection(ctx context.Context, direction string) (int64, error) {
+	const query = `
+	SELECT COUNT(*)
+	FROM failed_sync_queue
+	WHERE direction = ?`
+
+	var total int64
+	err := q.withDBLock(func() error {
+		return q.db.QueryRowContext(ctx, query, direction).Scan(&total)
+	})
+	if err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
 func (q *QueueSQLite) PeekByDirection(ctx context.Context, direction string, limit int) ([]QueueJob, error) {
 	const query = `
 	SELECT id, direction, payload_json, created_at

@@ -15,6 +15,7 @@ import type {
   SyncSelectedResult,
   ImageSyncResult,
   ImageSyncStats,
+  PendingProductImagesSummary,
 } from "@/types/domain";
 
 interface AppBindings {
@@ -47,6 +48,7 @@ interface AppBindings {
   SyncSelectedTables: (tableNames: string[]) => Promise<SyncSelectedResult>;
   SyncProductImagesNow: (force: boolean) => Promise<ImageSyncResult>;
   GetImageSyncStatus: () => Promise<ImageSyncStats>;
+  GetPendingProductImages: () => Promise<PendingProductImagesSummary>;
 }
 
 interface WailsRuntime {
@@ -408,6 +410,21 @@ export const bridge = {
       return wailsWindow.go!.main!.App!.GetImageSyncStatus();
     }
     return { uploaded: 0, skipped: 0, failed: 0 };
+  },
+  async getPendingProductImages(): Promise<PendingProductImagesSummary> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.GetPendingProductImages();
+    }
+    return {
+      total: 0,
+      ready: 0,
+      missing: 0,
+      invalid: 0,
+      queued_retry: 0,
+      local_base: "C:\\Sys_Image",
+      preview_limit: 50,
+      items: [],
+    };
   },
   on(event: string, handler: (payload: unknown) => void): () => void {
     if (!isWailsAvailable()) {

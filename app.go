@@ -357,6 +357,37 @@ func (a *App) SyncProductImagesNow(force bool) ImageSyncResult {
 	}
 }
 
+func (a *App) GetPendingProductImages() syncworker.PendingProductImagesSummary {
+	if a.cfg == nil {
+		return syncworker.PendingProductImagesSummary{}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	localPG, remotePG, err := a.openReconcileConnections(ctx)
+	if err != nil {
+		a.runtime.AddLog("pending product images preview failed: " + err.Error())
+		return syncworker.PendingProductImagesSummary{LocalBase: a.cfg.ImageLocalBasePath}
+	}
+	defer localPG.Close()
+	defer remotePG.Close()
+
+	summary, err := syncworker.PreviewPendingProductImages(
+		ctx,
+		localPG,
+		a.queue,
+		a.cfg.SourceSchema,
+		a.cfg.ImageLocalBasePath,
+		50,
+	)
+	if err != nil {
+		a.runtime.AddLog("pending product images preview failed: " + err.Error())
+		return syncworker.PendingProductImagesSummary{LocalBase: a.cfg.ImageLocalBasePath}
+	}
+	return summary
+}
+
 func (a *App) GetImageSyncStatus() syncworker.ImageSyncStats {
 	if a.queue == nil {
 		return syncworker.ImageSyncStats{}

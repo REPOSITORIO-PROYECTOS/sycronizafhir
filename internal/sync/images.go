@@ -37,6 +37,24 @@ type ImageSyncStats struct {
 	Message   string    `json:"message"`
 }
 
+type PendingProductImage struct {
+	ProdID       string `json:"prod_id"`
+	ProdImagen   string `json:"prod_imagen"`
+	FileStatus   string `json:"file_status"`
+	ResolvedPath string `json:"resolved_path,omitempty"`
+}
+
+type PendingProductImagesSummary struct {
+	Total        int64                 `json:"total"`
+	Ready        int                   `json:"ready"`
+	Missing      int                   `json:"missing"`
+	Invalid      int                   `json:"invalid"`
+	QueuedRetry  int64                 `json:"queued_retry"`
+	LocalBase    string                `json:"local_base"`
+	PreviewLimit int                   `json:"preview_limit"`
+	Items        []PendingProductImage `json:"items"`
+}
+
 type imageCacheEntry struct {
 	Fingerprint string `json:"fingerprint"`
 	URL         string `json:"url"`
@@ -375,9 +393,11 @@ func (w *ImageSyncWorker) runCycle(ctx context.Context, force bool) error {
 		}
 	}
 
-	now := time.Now().UTC()
-	if err := w.persistCheckpoint(ctx, now); err != nil {
-		log.Printf("persist image sync checkpoint failed: %v", err)
+	if len(failed) == 0 {
+		now := time.Now().UTC()
+		if err := w.persistCheckpoint(ctx, now); err != nil {
+			log.Printf("persist image sync checkpoint failed: %v", err)
+		}
 	}
 
 	if len(failed) > 0 {
@@ -469,6 +489,77 @@ func (w *ImageSyncWorker) loadPersistedStatus(ctx context.Context) error {
 	return nil
 }
 
+func PreviewPendingProductImages(
+	ctx context.Context,
+	localPG *db.LocalPG,
+	queue *db.QueueSQLite,
+	schemaName, localBase string,
+	previewLimit int,
+) (PendingProductImagesSummary, error) {
+	summary := PendingProductImagesSummary{
+		LocalBase:    strings.TrimSpace(localBase),
+		PreviewLimit: previewLimit,
+		Items:        []PendingProductImage{},
+	}
+	if localPG == nil {
+		return summary, fmt.Errorf("conexion local no disponible")
+	}
+	if previewLimit <= 0 {
+		previewLimit = 50
+	}
+	summary.PreviewLimit = previewLimit
+
+	total, err := localPG.CountProductImageCandidates(ctx, schemaName, time.Time{})
+	if err != nil {
+		return summary, err
+	}
+	summary.Total = total
+
+	if queue != nil {
+		queued, countErr := queue.CountByDirection(ctx, imageUploadDirection)
+		if countErr == nil {
+			summary.QueuedRetry = queued
+		}
+	}
+
+	candidates, err := localPG.LoadProductImageCandidates(ctx, schemaName, time.Time{}, previewLimit, 0)
+	if err != nil {
+		return summary, err
+	}
+
+	for _, candidate := range candidates {
+		item := PendingProductImage{
+			ProdID:     candidate.ProdID,
+			ProdImagen: candidate.ProdImagen,
+		}
+		status, resolvedPath := classifyPendingImageFile(localBase, candidate.ProdImagen)
+		item.FileStatus = status
+		item.ResolvedPath = resolvedPath
+		switch status {
+		case "ready":
+			summary.Ready++
+		case "missing":
+			summary.Missing++
+		default:
+			summary.Invalid++
+		}
+		summary.Items = append(summary.Items, item)
+	}
+
+	return summary, nil
+}
+
+func classifyPendingImageFile(localBase, imagePath string) (status, resolvedPath string) {
+	resolvedPath, err := resolveLocalImagePath(localBase, imagePath)
+	if err != nil {
+		if strings.Contains(err.Error(), "no encontrado") {
+			return "missing", ""
+		}
+		return "invalid", ""
+	}
+	return "ready", resolvedPath
+}
+
 func LoadImageSyncStatus(ctx context.Context, queue *db.QueueSQLite) (ImageSyncStats, bool, error) {
 	if queue == nil {
 		return ImageSyncStats{}, false, nil
@@ -494,13 +585,7 @@ func isLocalImagePath(value string) bool {
 	if trimmed == "" || isRemoteImageURL(trimmed) {
 		return false
 	}
-	if strings.HasPrefix(trimmed, `\\`) || strings.HasPrefix(trimmed, `/`) {
-		return true
-	}
-	if len(trimmed) >= 2 && trimmed[1] == ':' {
-		return true
-	}
-	return strings.Contains(trimmed, `\`)
+	return !strings.Contains(trimmed, "://")
 }
 
 func resolveLocalImagePath(basePath, imagePath string) (string, error) {

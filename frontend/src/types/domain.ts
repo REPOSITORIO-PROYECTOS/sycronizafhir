@@ -175,6 +175,24 @@ export interface SyncSelectedResult {
   synced_rows: number;
 }
 
+export interface PendingProductImage {
+  prod_id: string;
+  prod_imagen: string;
+  file_status: "ready" | "missing" | "invalid";
+  resolved_path?: string;
+}
+
+export interface PendingProductImagesSummary {
+  total: number;
+  ready: number;
+  missing: number;
+  invalid: number;
+  queued_retry: number;
+  local_base: string;
+  preview_limit: number;
+  items: PendingProductImage[];
+}
+
 export interface ImageSyncStats {
   uploaded: number;
   skipped: number;
