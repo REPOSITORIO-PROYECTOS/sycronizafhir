@@ -3,6 +3,20 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.5.5] - 2026-06-09
+
+### Agregado
+
+- **Sync de imágenes de productos**: sube fotos desde rutas locales Windows (`C:\Sys_Image\...`) a Supabase Storage y reemplaza `prod_imagen` por URL pública solo en Supabase (PostgreSQL local intacto).
+- Worker `image_sync` automático (default cada 5 min) con cola de reintentos SQLite y cache por archivo.
+- Integración en outbound/reconcile: los upserts de `productos` ya no vuelven a escribir rutas `C:\...` en la nube.
+- UI **Sincronización** → card **Imágenes de productos** → botón **Subir imágenes ahora**.
+- SQL `003_supabase_storage_productos.sql`: bucket público `productos` (sin política SELECT amplia que permita listar todo el bucket).
+
+### Configuración
+
+- `IMAGE_SYNC_ENABLED`, `IMAGE_SYNC_INTERVAL_SECONDS`, `SUPABASE_STORAGE_BUCKET_PRODUCTOS`, `IMAGE_LOCAL_BASE_PATH`, `SUPABASE_URL` (requerida con image sync activo).
+
 ## [1.5.4] - 2026-06-09
 
 ### Corregido

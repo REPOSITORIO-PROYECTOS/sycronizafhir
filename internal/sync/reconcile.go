@@ -37,26 +37,29 @@ type DataAuditReport struct {
 }
 
 type ReconcileService struct {
-	localPG      *db.LocalPG
-	remotePG     *supabase.PGClient
-	sourceSchema string
-	exclude      []string
-	runtime      *monitor.Runtime
+	localPG       *db.LocalPG
+	remotePG      *supabase.PGClient
+	imageResolver *ImageResolver
+	sourceSchema  string
+	exclude       []string
+	runtime       *monitor.Runtime
 }
 
 func NewReconcileService(
 	localPG *db.LocalPG,
 	remotePG *supabase.PGClient,
+	imageResolver *ImageResolver,
 	sourceSchema string,
 	exclude []string,
 	runtime *monitor.Runtime,
 ) *ReconcileService {
 	return &ReconcileService{
-		localPG:      localPG,
-		remotePG:     remotePG,
-		sourceSchema: sourceSchema,
-		exclude:      exclude,
-		runtime:      runtime,
+		localPG:       localPG,
+		remotePG:      remotePG,
+		imageResolver: imageResolver,
+		sourceSchema:  sourceSchema,
+		exclude:       exclude,
+		runtime:       runtime,
 	}
 }
 
@@ -403,6 +406,10 @@ func (s *ReconcileService) SyncTableDiff(
 		if len(rows) == 0 {
 			continue
 		}
+		if table.Name == "productos" && s.imageResolver != nil && s.imageResolver.Enabled() {
+			rows = s.imageResolver.ResolveProductRows(ctx, rows)
+		}
+
 		if upsertErr := s.remotePG.UpsertRows(ctx, "public", remoteTable, rows, table.PrimaryKeys); upsertErr != nil {
 			return synced, upsertErr
 		}

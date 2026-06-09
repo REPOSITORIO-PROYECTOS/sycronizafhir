@@ -63,6 +63,9 @@ export interface ConfigSummary {
   exclude_tables: string[];
   outbound_every: string;
   audit_every: string;
+  image_sync_every?: string;
+  storage_bucket_productos?: string;
+  image_sync_enabled?: boolean;
   realtime_url: string;
   channel: string;
   schema: string;
@@ -170,4 +173,19 @@ export interface SyncSelectedResult {
   success: boolean;
   message: string;
   synced_rows: number;
+}
+
+export interface ImageSyncStats {
+  uploaded: number;
+  skipped: number;
+  failed: number;
+  started_at?: string;
+  finished_at?: string;
+  message?: string;
+}
+
+export interface ImageSyncResult {
+  success: boolean;
+  message: string;
+  stats: ImageSyncStats;
 }

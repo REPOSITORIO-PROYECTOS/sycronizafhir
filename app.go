@@ -41,9 +41,12 @@ type ConfigSummary struct {
 	RemoteDB      string   `json:"remote_db"`
 	SourceSchema  string   `json:"source_schema"`
 	ExcludeTables []string `json:"exclude_tables"`
-	OutboundEvery string   `json:"outbound_every"`
-	AuditEvery    string   `json:"audit_every"`
-	RealtimeURL   string   `json:"realtime_url"`
+	OutboundEvery          string `json:"outbound_every"`
+	AuditEvery             string `json:"audit_every"`
+	ImageSyncEvery         string `json:"image_sync_every"`
+	StorageBucketProductos string `json:"storage_bucket_productos"`
+	ImageSyncEnabled       bool   `json:"image_sync_enabled"`
+	RealtimeURL            string `json:"realtime_url"`
 	Channel       string   `json:"channel"`
 	Schema        string   `json:"schema"`
 	Table         string   `json:"table"`
@@ -73,6 +76,12 @@ type SyncSelectedResult struct {
 	Success    bool   `json:"success"`
 	Message    string `json:"message"`
 	SyncedRows int    `json:"synced_rows"`
+}
+
+type ImageSyncResult struct {
+	Success bool                     `json:"success"`
+	Message string                   `json:"message"`
+	Stats   syncworker.ImageSyncStats `json:"stats"`
 }
 
 type LocalConnectionInput struct {
@@ -172,7 +181,7 @@ func (a *App) ListAvailableSyncTables() ([]AvailableSyncTable, error) {
 	defer remotePG.Close()
 
 	syncCfg, _ := config.LoadSyncTablesConfig()
-	service := syncworker.NewReconcileService(localPG, remotePG, a.cfg.SourceSchema, a.cfg.ExcludeTables, a.runtime)
+	service := syncworker.NewReconcileService(localPG, remotePG, a.newImageResolver(), a.cfg.SourceSchema, a.cfg.ExcludeTables, a.runtime)
 	tables, err := service.ListAvailableTables(ctx)
 	if err != nil {
 		return nil, err
@@ -220,7 +229,7 @@ func (a *App) RunDataAudit(applySync bool) DataAuditActionResult {
 	defer remotePG.Close()
 
 	syncCfg, _ := config.LoadSyncTablesConfig()
-	service := syncworker.NewReconcileService(localPG, remotePG, a.cfg.SourceSchema, a.cfg.ExcludeTables, a.runtime)
+	service := syncworker.NewReconcileService(localPG, remotePG, a.newImageResolver(), a.cfg.SourceSchema, a.cfg.ExcludeTables, a.runtime)
 	report, err := service.RunAudit(ctx, syncCfg, "manual", applySync)
 	if err != nil {
 		return DataAuditActionResult{Success: false, Message: err.Error()}
@@ -280,7 +289,7 @@ func (a *App) SyncSelectedTables(tableNames []string) SyncSelectedResult {
 	defer remotePG.Close()
 
 	syncCfg, _ := config.LoadSyncTablesConfig()
-	service := syncworker.NewReconcileService(localPG, remotePG, a.cfg.SourceSchema, a.cfg.ExcludeTables, a.runtime)
+	service := syncworker.NewReconcileService(localPG, remotePG, a.newImageResolver(), a.cfg.SourceSchema, a.cfg.ExcludeTables, a.runtime)
 	synced, err := service.SyncSelectedTables(ctx, syncCfg, tableNames)
 	if err != nil {
 		return SyncSelectedResult{Success: false, Message: err.Error(), SyncedRows: synced}
@@ -304,6 +313,66 @@ func (a *App) SyncSelectedTables(tableNames []string) SyncSelectedResult {
 	}
 	a.runtime.AddLog(message)
 	return SyncSelectedResult{Success: true, Message: message, SyncedRows: synced}
+}
+
+func (a *App) SyncProductImagesNow(force bool) ImageSyncResult {
+	if a.cfg == nil {
+		return ImageSyncResult{Success: false, Message: "config no cargada"}
+	}
+	if !a.cfg.ImageSyncEnabled {
+		return ImageSyncResult{Success: false, Message: "image sync deshabilitado"}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	localPG, remotePG, err := a.openReconcileConnections(ctx)
+	if err != nil {
+		return ImageSyncResult{Success: false, Message: err.Error()}
+	}
+	defer localPG.Close()
+	defer remotePG.Close()
+
+	worker := syncworker.NewImageSyncWorker(
+		localPG,
+		remotePG,
+		a.queue,
+		a.newImageResolver(),
+		*a.cfg,
+		a.runtime,
+	)
+	stats, err := worker.RunOnce(ctx, force)
+	if err != nil {
+		return ImageSyncResult{
+			Success: false,
+			Message: err.Error(),
+			Stats:   stats,
+		}
+	}
+
+	return ImageSyncResult{
+		Success: true,
+		Message: stats.Message,
+		Stats:   stats,
+	}
+}
+
+func (a *App) GetImageSyncStatus() syncworker.ImageSyncStats {
+	if a.queue == nil {
+		return syncworker.ImageSyncStats{}
+	}
+	stats, exists, err := syncworker.LoadImageSyncStatus(context.Background(), a.queue)
+	if err != nil || !exists {
+		return syncworker.ImageSyncStats{}
+	}
+	return stats
+}
+
+func (a *App) newImageResolver() *syncworker.ImageResolver {
+	if a.cfg == nil {
+		return syncworker.NewImageResolver(config.Config{}, a.queue, a.runtime)
+	}
+	return syncworker.NewImageResolver(*a.cfg, a.queue, a.runtime)
 }
 
 func (a *App) openReconcileConnections(ctx context.Context) (*db.LocalPG, *supabase.PGClient, error) {
@@ -371,14 +440,17 @@ func (a *App) GetConfigSummary() ConfigSummary {
 	}
 
 	return ConfigSummary{
-		AppName:       "sycronizafhir",
-		LocalDB:       summarizePostgresURL(a.cfg.LocalPostgresURL),
-		RemoteDB:      summarizePostgresURL(a.cfg.SupabaseDBDSN()),
-		SourceSchema:  a.cfg.SourceSchema,
-		ExcludeTables: append([]string{}, a.cfg.ExcludeTables...),
-		OutboundEvery: a.cfg.OutboundInterval.String(),
-		AuditEvery:    a.cfg.AuditInterval.String(),
-		RealtimeURL:   redactSensitive(a.cfg.SupabaseRealtimeURL),
+		AppName:                "sycronizafhir",
+		LocalDB:                summarizePostgresURL(a.cfg.LocalPostgresURL),
+		RemoteDB:               summarizePostgresURL(a.cfg.SupabaseDBDSN()),
+		SourceSchema:           a.cfg.SourceSchema,
+		ExcludeTables:          append([]string{}, a.cfg.ExcludeTables...),
+		OutboundEvery:          a.cfg.OutboundInterval.String(),
+		AuditEvery:             a.cfg.AuditInterval.String(),
+		ImageSyncEvery:         a.cfg.ImageSyncInterval.String(),
+		StorageBucketProductos: a.cfg.StorageBucketProductos,
+		ImageSyncEnabled:       a.cfg.ImageSyncEnabled,
+		RealtimeURL:            redactSensitive(a.cfg.SupabaseRealtimeURL),
 		Channel:       a.cfg.RealtimeChannel,
 		Schema:        a.cfg.RealtimeSchema,
 		Table:         a.cfg.RealtimeTable,

@@ -25,6 +25,12 @@ type SyncTable struct {
 	PrimaryKeys []string
 }
 
+type ProductImageCandidate struct {
+	ProdID            string
+	ProdImagen        string
+	FechaModificacion time.Time
+}
+
 var safeIdentifierPattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 func NewLocalPG(ctx context.Context, dsn string) (*LocalPG, error) {
@@ -224,6 +230,67 @@ func (db *LocalPG) LoadUpdatedRows(ctx context.Context, schemaName, tableName st
 		}
 
 		result = append(result, supabase.NormalizeRowMap(item))
+	}
+
+	return result, rows.Err()
+}
+
+func (db *LocalPG) LoadProductImageCandidates(
+	ctx context.Context,
+	schemaName string,
+	since time.Time,
+	limit, offset int,
+) ([]ProductImageCandidate, error) {
+	if !safeIdentifierPattern.MatchString(schemaName) {
+		return nil, fmt.Errorf("invalid schema name: %s", schemaName)
+	}
+	if limit <= 0 || offset < 0 {
+		return nil, errors.New("invalid pagination values")
+	}
+
+	isDateColumn, err := db.isFechaModificacionDate(ctx, schemaName, "productos")
+	if err != nil {
+		return nil, err
+	}
+
+	query := fmt.Sprintf(`
+		SELECT prod_id, prod_imagen, fecha_modificacion
+		FROM %s.productos
+		WHERE prod_imagen IS NOT NULL
+		  AND BTRIM(prod_imagen::text) <> ''
+		  AND LOWER(BTRIM(prod_imagen::text)) NOT LIKE 'http://%%'
+		  AND LOWER(BTRIM(prod_imagen::text)) NOT LIKE 'https://%%'
+	`, schemaName)
+
+	args := make([]interface{}, 0, 3)
+	if !since.IsZero() {
+		if isDateColumn {
+			query += " AND fecha_modificacion >= $1::date"
+		} else {
+			query += " AND fecha_modificacion > $1"
+		}
+		args = append(args, since)
+	}
+
+	argIndex := len(args) + 1
+	query += fmt.Sprintf(" ORDER BY fecha_modificacion ASC LIMIT $%d OFFSET $%d", argIndex, argIndex+1)
+	args = append(args, limit, offset)
+
+	rows, err := db.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]ProductImageCandidate, 0, limit)
+	for rows.Next() {
+		var candidate ProductImageCandidate
+		if scanErr := rows.Scan(&candidate.ProdID, &candidate.ProdImagen, &candidate.FechaModificacion); scanErr != nil {
+			return nil, scanErr
+		}
+		candidate.ProdID = strings.TrimSpace(candidate.ProdID)
+		candidate.ProdImagen = strings.TrimSpace(candidate.ProdImagen)
+		result = append(result, candidate)
 	}
 
 	return result, rows.Err()

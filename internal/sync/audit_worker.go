@@ -14,19 +14,21 @@ import (
 const auditLastRunStateKey = "data_audit_last_run_utc"
 
 type AuditWorker struct {
-	localPG      *db.LocalPG
-	remotePG     *supabase.PGClient
-	queue        *db.QueueSQLite
-	sourceSchema string
-	exclude      []string
-	interval     time.Duration
-	runtime      *monitor.Runtime
+	localPG       *db.LocalPG
+	remotePG      *supabase.PGClient
+	queue         *db.QueueSQLite
+	imageResolver *ImageResolver
+	sourceSchema  string
+	exclude       []string
+	interval      time.Duration
+	runtime       *monitor.Runtime
 }
 
 func NewAuditWorker(
 	localPG *db.LocalPG,
 	remotePG *supabase.PGClient,
 	queue *db.QueueSQLite,
+	imageResolver *ImageResolver,
 	sourceSchema string,
 	exclude []string,
 	interval time.Duration,
@@ -36,13 +38,14 @@ func NewAuditWorker(
 		interval = 6 * time.Hour
 	}
 	return &AuditWorker{
-		localPG:      localPG,
-		remotePG:     remotePG,
-		queue:        queue,
-		sourceSchema: sourceSchema,
-		exclude:      exclude,
-		interval:     interval,
-		runtime:      runtime,
+		localPG:       localPG,
+		remotePG:      remotePG,
+		queue:         queue,
+		imageResolver: imageResolver,
+		sourceSchema:  sourceSchema,
+		exclude:       exclude,
+		interval:      interval,
+		runtime:       runtime,
 	}
 }
 
@@ -76,7 +79,7 @@ func (w *AuditWorker) runScheduledCycle(ctx context.Context) error {
 		return err
 	}
 
-	service := NewReconcileService(w.localPG, w.remotePG, w.sourceSchema, w.exclude, w.runtime)
+	service := NewReconcileService(w.localPG, w.remotePG, w.imageResolver, w.sourceSchema, w.exclude, w.runtime)
 	report, err := service.RunAudit(ctx, syncCfg, "scheduled", true)
 	if err != nil {
 		return err

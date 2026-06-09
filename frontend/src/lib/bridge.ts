@@ -13,6 +13,8 @@ import type {
   DataAuditReport,
   DataAuditActionResult,
   SyncSelectedResult,
+  ImageSyncResult,
+  ImageSyncStats,
 } from "@/types/domain";
 
 interface AppBindings {
@@ -43,6 +45,8 @@ interface AppBindings {
   RunDataAudit: (applySync: boolean) => Promise<DataAuditActionResult>;
   GetLastDataAudit: () => Promise<DataAuditReport>;
   SyncSelectedTables: (tableNames: string[]) => Promise<SyncSelectedResult>;
+  SyncProductImagesNow: (force: boolean) => Promise<ImageSyncResult>;
+  GetImageSyncStatus: () => Promise<ImageSyncStats>;
 }
 
 interface WailsRuntime {
@@ -388,6 +392,22 @@ export const bridge = {
       message: `Sync mock para ${tableNames.length} tabla(s)`,
       synced_rows: 0,
     };
+  },
+  async syncProductImagesNow(force: boolean): Promise<ImageSyncResult> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.SyncProductImagesNow(force);
+    }
+    return {
+      success: true,
+      message: "image sync mock completado",
+      stats: { uploaded: 0, skipped: 0, failed: 0, message: "mock" },
+    };
+  },
+  async getImageSyncStatus(): Promise<ImageSyncStats> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.GetImageSyncStatus();
+    }
+    return { uploaded: 0, skipped: 0, failed: 0 };
   },
   on(event: string, handler: (payload: unknown) => void): () => void {
     if (!isWailsAvailable()) {

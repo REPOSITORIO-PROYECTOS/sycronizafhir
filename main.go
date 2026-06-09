@@ -305,15 +305,19 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 		return result, nil
 	})
 
-	outbound := syncworker.NewOutboundWorker(localPG, queueDB, supabasePG, *cfg, rt)
+	imageResolver := syncworker.NewImageResolver(*cfg, queueDB, rt)
+	outbound := syncworker.NewOutboundWorker(localPG, queueDB, supabasePG, imageResolver, *cfg, rt)
 	inbound := syncworker.NewInboundWorker(localPG, queueDB, *cfg, rt)
 	presence := syncworker.NewPresenceWorker(queueDB, supabasePG, *cfg, rt, resolution.Selected.Kind, localDBSummary)
-	audit := syncworker.NewAuditWorker(localPG, supabasePG, queueDB, cfg.SourceSchema, cfg.ExcludeTables, cfg.AuditInterval, rt)
+	audit := syncworker.NewAuditWorker(localPG, supabasePG, queueDB, imageResolver, cfg.SourceSchema, cfg.ExcludeTables, cfg.AuditInterval, rt)
+	imageSync := syncworker.NewImageSyncWorker(localPG, supabasePG, queueDB, imageResolver, *cfg, rt)
 
 	rt.SetMeta("audit_every", cfg.AuditInterval.String())
+	rt.SetMeta("image_sync_every", cfg.ImageSyncInterval.String())
+	rt.SetMeta("storage_bucket_productos", cfg.StorageBucketProductos)
 
 	wg := &sync.WaitGroup{}
-	wg.Add(4)
+	wg.Add(5)
 	go func() {
 		defer wg.Done()
 		outbound.Run(ctx)
@@ -329,6 +333,10 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 	go func() {
 		defer wg.Done()
 		audit.Run(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		imageSync.Run(ctx)
 	}()
 
 	go func() {

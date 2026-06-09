@@ -36,6 +36,10 @@ type Config struct {
 	ExcludeTables       []string
 	BootstrapChunkSize  int
 	AuditInterval       time.Duration
+	ImageSyncEnabled    bool
+	ImageSyncInterval   time.Duration
+	ImageLocalBasePath  string
+	StorageBucketProductos string
 }
 
 func Load() (Config, error) {
@@ -58,6 +62,11 @@ func Load() (Config, error) {
 	}
 
 	auditHours, err := readIntWithDefault("SYNC_AUDIT_INTERVAL_HOURS", 6)
+	if err != nil {
+		return Config{}, err
+	}
+
+	imageSyncSeconds, err := readIntWithDefault("IMAGE_SYNC_INTERVAL_SECONDS", 300)
 	if err != nil {
 		return Config{}, err
 	}
@@ -90,8 +99,12 @@ func Load() (Config, error) {
 		RealtimeTable:       readStringWithDefault("SUPABASE_REALTIME_TABLE", "pedidos"),
 		SourceSchema:        readStringWithDefault("SYNC_SOURCE_SCHEMA", "public"),
 		ExcludeTables:       readCSV("SYNC_EXCLUDE_TABLES"),
-		BootstrapChunkSize:  bootstrapChunkSize,
-		AuditInterval:       time.Duration(auditHours) * time.Hour,
+		BootstrapChunkSize:       bootstrapChunkSize,
+		AuditInterval:            time.Duration(auditHours) * time.Hour,
+		ImageSyncEnabled:         readBoolWithDefault("IMAGE_SYNC_ENABLED", true),
+		ImageSyncInterval:        time.Duration(imageSyncSeconds) * time.Second,
+		ImageLocalBasePath:       readStringWithDefault("IMAGE_LOCAL_BASE_PATH", `C:\Sys_Image`),
+		StorageBucketProductos:   readStringWithDefault("SUPABASE_STORAGE_BUCKET_PRODUCTOS", "productos"),
 	}
 
 	if override, ok, overrideErr := LoadLocalDBOverride(); overrideErr == nil && ok {
@@ -119,6 +132,10 @@ func Load() (Config, error) {
 
 	if isPlaceholderSecret(cfg.SupabaseServiceRole) {
 		return Config{}, errors.New("SUPABASE_SERVICE_ROLE_KEY is using a placeholder value")
+	}
+
+	if cfg.ImageSyncEnabled && strings.TrimSpace(cfg.SupabaseURL) == "" {
+		return Config{}, errors.New("SUPABASE_URL is required when IMAGE_SYNC_ENABLED=true")
 	}
 
 	return cfg, nil
@@ -233,6 +250,21 @@ func readIntWithDefault(key string, fallback int) (int, error) {
 	}
 
 	return parsed, nil
+}
+
+func readBoolWithDefault(key string, fallback bool) bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if value == "" {
+		return fallback
+	}
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func readIntOrDefaultNoError(key string, fallback int) int {

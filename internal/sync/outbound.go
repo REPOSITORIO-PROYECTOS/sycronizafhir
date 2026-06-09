@@ -21,6 +21,7 @@ type OutboundWorker struct {
 	localPG       *db.LocalPG
 	queue         *db.QueueSQLite
 	pgClient      *supabase.PGClient
+	imageResolver *ImageResolver
 	pollInterval  time.Duration
 	sourceSchema  string
 	excludeTables []string
@@ -34,11 +35,19 @@ type queuedOutboundPayload struct {
 	Rows            []map[string]interface{} `json:"rows"`
 }
 
-func NewOutboundWorker(localPG *db.LocalPG, queue *db.QueueSQLite, pgClient *supabase.PGClient, cfg config.Config, runtime *monitor.Runtime) *OutboundWorker {
+func NewOutboundWorker(
+	localPG *db.LocalPG,
+	queue *db.QueueSQLite,
+	pgClient *supabase.PGClient,
+	imageResolver *ImageResolver,
+	cfg config.Config,
+	runtime *monitor.Runtime,
+) *OutboundWorker {
 	return &OutboundWorker{
 		localPG:       localPG,
 		queue:         queue,
 		pgClient:      pgClient,
+		imageResolver: imageResolver,
 		pollInterval:  cfg.OutboundInterval,
 		sourceSchema:  cfg.SourceSchema,
 		excludeTables: cfg.ExcludeTables,
@@ -98,6 +107,10 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 			continue
 		}
 
+		if table.Name == "productos" && w.imageResolver != nil && w.imageResolver.Enabled() {
+			rows = w.imageResolver.ResolveProductRows(ctx, rows)
+		}
+
 		if err = w.pgClient.UpsertRows(ctx, "public", table.Name, rows, table.PrimaryKeys); err != nil {
 			payload := queuedOutboundPayload{
 				TableName:       table.Name,
@@ -151,7 +164,12 @@ func (w *OutboundWorker) retryQueuedOutbound(ctx context.Context) error {
 			continue
 		}
 
-		if err = w.pgClient.UpsertRows(ctx, "public", payload.TableName, payload.Rows, payload.ConflictColumns); err != nil {
+		rows := payload.Rows
+		if payload.TableName == "productos" && w.imageResolver != nil && w.imageResolver.Enabled() {
+			rows = w.imageResolver.ResolveProductRows(ctx, rows)
+		}
+
+		if err = w.pgClient.UpsertRows(ctx, "public", payload.TableName, rows, payload.ConflictColumns); err != nil {
 			failedJobs = append(failedJobs, fmt.Sprintf("%d:%s", job.ID, payload.TableName))
 			log.Printf("retry queued outbound job failed id=%d table=%s: %v", job.ID, payload.TableName, err)
 			w.runtime.AddLog(fmt.Sprintf("retry queued outbound failed id=%d table=%s: %v", job.ID, payload.TableName, err))

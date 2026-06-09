@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   Database,
+  ImageIcon,
 } from "lucide-react";
 
 import { Topbar } from "@/components/layout/Topbar";
@@ -81,6 +82,12 @@ export function SyncView() {
     refetchInterval: 15000,
   });
 
+  const { data: imageSyncStatus, refetch: refetchImageStatus } = useQuery({
+    queryKey: ["image-sync-status"],
+    queryFn: () => bridge.getImageSyncStatus(),
+    refetchInterval: 15000,
+  });
+
   useEffect(() => {
     if (!availableTables) return;
     const enabled = availableTables.filter((t) => t.enabled).map((t) => t.name);
@@ -115,6 +122,15 @@ export function SyncView() {
     onSuccess: async (result) => {
       setFeedback({ ok: result.success, text: result.message });
       await refetchAudit();
+    },
+    onError: (error: Error) => setFeedback({ ok: false, text: error.message }),
+  });
+
+  const imageSyncMutation = useMutation({
+    mutationFn: () => bridge.syncProductImagesNow(true),
+    onSuccess: async (result) => {
+      setFeedback({ ok: result.success, text: result.message });
+      await refetchImageStatus();
     },
     onError: (error: Error) => setFeedback({ ok: false, text: error.message }),
   });
@@ -206,6 +222,45 @@ export function SyncView() {
             </CardContent>
           </Card>
         </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ImageIcon className="h-4 w-4 text-primary" />
+              Imágenes de productos
+            </CardTitle>
+            <CardDescription>
+              Sube fotos desde rutas locales (ej. C:\Sys_Image) a Supabase Storage y actualiza
+              prod_imagen en la nube con URL pública.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="text-sm text-muted-foreground space-y-1">
+              <p>
+                Bucket: {configSummary?.storage_bucket_productos ?? "productos"} · Intervalo:{" "}
+                {configSummary?.image_sync_every ?? "5m0s"}
+              </p>
+              {imageSyncStatus?.finished_at ? (
+                <p>
+                  Último ciclo: {new Date(imageSyncStatus.finished_at).toLocaleString()} — subidas{" "}
+                  {imageSyncStatus.uploaded}, omitidas {imageSyncStatus.skipped}, fallidas{" "}
+                  {imageSyncStatus.failed}
+                </p>
+              ) : (
+                <p>Último ciclo: pendiente</p>
+              )}
+            </div>
+            <Button
+              disabled={
+                imageSyncMutation.isPending || configSummary?.image_sync_enabled === false
+              }
+              onClick={() => imageSyncMutation.mutate()}
+            >
+              <Upload className="mr-2 h-4 w-4" />
+              Subir imágenes ahora
+            </Button>
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>
