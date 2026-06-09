@@ -3,6 +3,15 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.5.4] - 2026-06-09
+
+### Corregido
+
+- Auditoría de datos: hash de filas normaliza padding `char`, numéricos y fechas para evitar miles de falsos "Diff" en `clientes`/`productos`.
+- **Subir seleccionadas** re-audita al terminar y actualiza la tabla de pendientes.
+- **Auditar y subir diffs** sincroniza siempre en acción manual (no depende solo de Auto-sync).
+- Sync diff de `clientes`/`productos` ya no aborta con mensaje genérico de "revisión de detalle".
+
 ## [1.5.3] - 2026-06-05
 
 ### Corregido

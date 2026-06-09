@@ -286,7 +286,22 @@ func (a *App) SyncSelectedTables(tableNames []string) SyncSelectedResult {
 		return SyncSelectedResult{Success: false, Message: err.Error(), SyncedRows: synced}
 	}
 
+	report, auditErr := service.RunAudit(ctx, syncCfg, "post-sync", false)
+	if auditErr == nil {
+		if a.queue != nil {
+			_ = syncworker.SaveAuditReport(ctx, a.queue, report)
+		}
+		a.auditMu.Lock()
+		a.lastAudit = report
+		a.auditMu.Unlock()
+	} else {
+		a.runtime.AddLog(fmt.Sprintf("post-sync audit failed: %v", auditErr))
+	}
+
 	message := fmt.Sprintf("Sincronizadas %d filas en %d tabla(s)", synced, len(tableNames))
+	if auditErr == nil {
+		message += fmt.Sprintf(". Re-audit: %s", report.Summary)
+	}
 	a.runtime.AddLog(message)
 	return SyncSelectedResult{Success: true, Message: message, SyncedRows: synced}
 }

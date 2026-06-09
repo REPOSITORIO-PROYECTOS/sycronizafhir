@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"sycronizafhir/internal/config"
@@ -112,7 +111,8 @@ func (s *ReconcileService) RunAudit(
 		totalChanged += result.Changed
 		report.Tables = append(report.Tables, result)
 
-		if applySync && syncCfg.AutoSyncOnAudit && (result.MissingInRemote > 0 || result.Changed > 0) {
+		shouldApplySync := applySync && (trigger == "manual" || syncCfg.AutoSyncOnAudit)
+		if shouldApplySync && (result.MissingInRemote > 0 || result.Changed > 0) {
 			synced, syncErr := s.SyncTableDiff(ctx, table, syncCfg.ResolveRemoteTable(table.Name))
 			if syncErr != nil {
 				result.Status = "error"
@@ -404,9 +404,6 @@ func (s *ReconcileService) SyncTableDiff(
 			continue
 		}
 		if upsertErr := s.remotePG.UpsertRows(ctx, "public", remoteTable, rows, table.PrimaryKeys); upsertErr != nil {
-			if requiresDetailPrompt(table.Name) {
-				return synced, fmt.Errorf("sync %s requiere revision de detalle: %w", table.Name, upsertErr)
-			}
 			return synced, upsertErr
 		}
 		synced += len(rows)
@@ -416,15 +413,6 @@ func (s *ReconcileService) SyncTableDiff(
 	}
 
 	return synced, nil
-}
-
-func requiresDetailPrompt(tableName string) bool {
-	switch strings.ToLower(tableName) {
-	case "clientes", "productos", "articulos":
-		return true
-	default:
-		return false
-	}
 }
 
 func mapRowsByPK(rows []map[string]interface{}, pkColumns []string) map[string]map[string]interface{} {
