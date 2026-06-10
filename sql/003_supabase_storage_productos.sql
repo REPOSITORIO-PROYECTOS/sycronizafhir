@@ -2,7 +2,10 @@
 -- Dónde: Supabase Dashboard → SQL Editor → pegar y ejecutar.
 --
 -- Convención de objetos: {prod_id}{ext}  (ej. 00202158.jpg)
--- El middleware sube con service_role; la lectura es pública para apps web.
+-- El middleware sube con SUPABASE_SERVICE_ROLE_KEY (JWT role=service_role).
+-- Esa clave bypass RLS; si ves "row-level security policy" en logs, la app
+-- está usando la anon key o una clave incorrecta, no este SQL.
+-- La lectura es pública por URL directa (bucket public=true).
 
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (

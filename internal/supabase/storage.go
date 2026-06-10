@@ -62,7 +62,17 @@ func (c *StorageClient) UploadObject(ctx context.Context, bucket, objectPath, co
 	}
 
 	rawBody, _ := io.ReadAll(res.Body)
-	return fmt.Errorf("storage upload failed bucket=%s object=%s status=%d body=%s", bucket, cleanObjectPath, res.StatusCode, string(rawBody))
+	bodyText := string(rawBody)
+	if strings.Contains(bodyText, "row-level security") || strings.Contains(bodyText, `"statusCode":"403"`) {
+		return fmt.Errorf(
+			"storage upload failed bucket=%s object=%s status=%d body=%s (causa probable: SUPABASE_SERVICE_ROLE_KEY es anon o inválida; la service_role bypass RLS)",
+			bucket,
+			cleanObjectPath,
+			res.StatusCode,
+			bodyText,
+		)
+	}
+	return fmt.Errorf("storage upload failed bucket=%s object=%s status=%d body=%s", bucket, cleanObjectPath, res.StatusCode, bodyText)
 }
 
 func (c *StorageClient) PublicURL(bucket, objectPath string) string {

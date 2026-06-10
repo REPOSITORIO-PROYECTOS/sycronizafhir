@@ -193,6 +193,13 @@ export interface PendingProductImagesSummary {
   items: PendingProductImage[];
 }
 
+export interface ImageSyncErrorSummary {
+  category: string;
+  message: string;
+  count: number;
+  sample_ids?: string[];
+}
+
 export interface ImageSyncStats {
   uploaded: number;
   skipped: number;
@@ -200,6 +207,7 @@ export interface ImageSyncStats {
   started_at?: string;
   finished_at?: string;
   message?: string;
+  error_summaries?: ImageSyncErrorSummary[];
 }
 
 export interface ImageSyncResult {

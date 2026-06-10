@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { bridge } from "@/lib/bridge";
 import type {
   AvailableSyncTable,
+  ImageSyncErrorSummary,
   PendingProductImage,
   TableAuditResult,
 } from "@/types/domain";
@@ -36,6 +37,15 @@ function statusBadge(status: string) {
     default:
       return <Badge variant="muted">{status}</Badge>;
   }
+}
+
+function formatImageSyncErrorSummaries(
+  summaries?: ImageSyncErrorSummary[]
+): string | null {
+  if (!summaries?.length) return null;
+  return summaries
+    .map((summary) => `${summary.count} fallo(s) [${summary.category}]: ${summary.message}`)
+    .join(" · ");
 }
 
 function imageStatusBadge(status: PendingProductImage["file_status"]) {
@@ -139,11 +149,12 @@ export function SyncView() {
       const detail = stats
         ? `Subidas: ${stats.uploaded}, omitidas: ${stats.skipped}, fallidas: ${stats.failed}.`
         : "";
+      const errorDetail = formatImageSyncErrorSummaries(stats?.error_summaries);
       setImageFeedback({
         ok: result.success,
         text: result.success
           ? `Subida completada. ${detail} ${result.message}`.trim()
-          : `${result.message}${detail ? ` ${detail}` : ""}`,
+          : [result.message, detail, errorDetail].filter(Boolean).join(" — "),
       });
       await Promise.all([
         refetchImageStatus(),
@@ -293,6 +304,13 @@ export function SyncView() {
                 <p>Último ciclo: pendiente</p>
               )}
             </div>
+
+            {imageSyncStatus?.failed && imageSyncStatus.error_summaries?.length ? (
+              <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                <span>{formatImageSyncErrorSummaries(imageSyncStatus.error_summaries)}</span>
+              </div>
+            ) : null}
 
             {loadingPendingImages ? (
               <p className="text-sm text-muted-foreground flex items-center gap-2">

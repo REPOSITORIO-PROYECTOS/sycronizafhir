@@ -29,12 +29,13 @@ const (
 )
 
 type ImageSyncStats struct {
-	Uploaded  int       `json:"uploaded"`
-	Skipped   int       `json:"skipped"`
-	Failed    int       `json:"failed"`
-	StartedAt time.Time `json:"started_at"`
-	FinishedAt time.Time `json:"finished_at"`
-	Message   string    `json:"message"`
+	Uploaded       int                     `json:"uploaded"`
+	Skipped        int                     `json:"skipped"`
+	Failed         int                     `json:"failed"`
+	StartedAt      time.Time               `json:"started_at"`
+	FinishedAt     time.Time               `json:"finished_at"`
+	Message        string                  `json:"message"`
+	ErrorSummaries []ImageSyncErrorSummary `json:"error_summaries,omitempty"`
 }
 
 type PendingProductImage struct {
@@ -95,9 +96,7 @@ func (r *ImageResolver) ResolveProductRows(ctx context.Context, rows []map[strin
 	resolved := make([]map[string]interface{}, len(rows))
 	for index, row := range rows {
 		clone := cloneRowMap(row)
-		if err := r.resolveProductRow(ctx, clone); err != nil && r.runtime != nil {
-			r.runtime.AddLog(fmt.Sprintf("image_sync: omitida fila producto: %v", err))
-		}
+		_ = r.resolveProductRow(ctx, clone)
 		resolved[index] = clone
 	}
 	return resolved
@@ -308,22 +307,29 @@ func (w *ImageSyncWorker) runCycle(ctx context.Context, force bool) error {
 	imageSyncCycleMu.Lock()
 	defer imageSyncCycleMu.Unlock()
 
-	if err := w.retryQueuedUploads(ctx); err != nil {
-		log.Printf("retry queued image uploads completed with errors: %v", err)
-		w.runtime.AddLog(fmt.Sprintf("image_sync retry queue warning: %v", err))
-	}
+	retryFailures := w.retryQueuedUploads(ctx)
 
 	stats := ImageSyncStats{
 		StartedAt: time.Now().UTC(),
 	}
+	failures := newImageSyncFailureCollector()
 	defer func() {
 		stats.FinishedAt = time.Now().UTC()
-		stats.Message = fmt.Sprintf("subidas=%d omitidas=%d fallidas=%d", stats.Uploaded, stats.Skipped, stats.Failed)
+		stats.ErrorSummaries = failures.ToSummaries()
+		stats.Message = formatImageSyncStatsMessage(stats.Uploaded, stats.Skipped, stats.Failed, stats.ErrorSummaries)
+		failures.LogCycleSummary(w.runtime, stats.Uploaded, stats.Skipped, stats.Failed)
 		w.mu.Lock()
 		w.lastStats = stats
 		w.mu.Unlock()
 		_ = w.persistStatus(ctx, stats)
 	}()
+
+	if retryFailures != nil && retryFailures.TotalFailed() > 0 {
+		log.Printf("retry queued image uploads completed with errors: %s", retryFailures.ShortSummary())
+		if w.runtime != nil {
+			w.runtime.AddLog(fmt.Sprintf("image_sync: reintentos pendientes — %s", retryFailures.ShortSummary()))
+		}
+	}
 
 	since := time.Time{}
 	if !force {
@@ -334,7 +340,6 @@ func (w *ImageSyncWorker) runCycle(ctx context.Context, force bool) error {
 
 	const batchSize = 100
 	offset := 0
-	failed := make([]string, 0)
 
 	for {
 		candidates, err := w.localPG.LoadProductImageCandidates(ctx, w.sourceSchema, since, batchSize, offset)
@@ -358,8 +363,7 @@ func (w *ImageSyncWorker) runCycle(ctx context.Context, force bool) error {
 
 			if resolveErr := w.resolver.resolveProductRow(ctx, row); resolveErr != nil {
 				stats.Failed++
-				failed = append(failed, candidate.ProdID)
-				w.runtime.AddLog(fmt.Sprintf("image_sync: fallo prod_id=%s: %v", candidate.ProdID, resolveErr))
+				failures.RecordFailure(candidate.ProdID, resolveErr)
 				payload, marshalErr := json.Marshal(queuedImagePayload{
 					ProdID:     candidate.ProdID,
 					ProdImagen: candidate.ProdImagen,
@@ -378,13 +382,11 @@ func (w *ImageSyncWorker) runCycle(ctx context.Context, force bool) error {
 
 			if upsertErr := w.remotePG.UpsertRows(ctx, "public", w.remoteTable, []map[string]interface{}{row}, []string{"prod_id"}); upsertErr != nil {
 				stats.Failed++
-				failed = append(failed, candidate.ProdID)
-				w.runtime.AddLog(fmt.Sprintf("image_sync: upsert remoto fallo prod_id=%s: %v", candidate.ProdID, upsertErr))
+				failures.RecordFailure(candidate.ProdID, upsertErr)
 				continue
 			}
 
 			stats.Uploaded++
-			w.runtime.AddLog(fmt.Sprintf("image_sync: subida prod_id=%s url=%s", candidate.ProdID, publicURL))
 		}
 
 		offset += len(candidates)
@@ -393,26 +395,31 @@ func (w *ImageSyncWorker) runCycle(ctx context.Context, force bool) error {
 		}
 	}
 
-	if len(failed) == 0 {
+	if stats.Failed == 0 {
 		now := time.Now().UTC()
 		if err := w.persistCheckpoint(ctx, now); err != nil {
 			log.Printf("persist image sync checkpoint failed: %v", err)
 		}
 	}
 
-	if len(failed) > 0 {
-		return fmt.Errorf("image sync completed with failures for products: %s", strings.Join(failed, ", "))
+	if stats.Failed > 0 {
+		return fmt.Errorf("image sync: %d fallo(s) — %s", stats.Failed, failures.ShortSummary())
 	}
 	return nil
 }
 
-func (w *ImageSyncWorker) retryQueuedUploads(ctx context.Context) error {
+func (w *ImageSyncWorker) retryQueuedUploads(ctx context.Context) *imageSyncFailureCollector {
+	failures := newImageSyncFailureCollector()
 	jobs, err := w.queue.PeekByDirection(ctx, imageUploadDirection, 50)
 	if err != nil {
-		return err
+		log.Printf("retry queued image uploads failed: %v", err)
+		if w.runtime != nil {
+			w.runtime.AddLog(fmt.Sprintf("image_sync: cola de reintentos: %v", err))
+		}
+		return failures
 	}
 
-	failedJobs := make([]string, 0)
+	retryOK := 0
 	for _, job := range jobs {
 		var payload queuedImagePayload
 		if err = json.Unmarshal([]byte(job.PayloadJSON), &payload); err != nil {
@@ -426,7 +433,7 @@ func (w *ImageSyncWorker) retryQueuedUploads(ctx context.Context) error {
 			"fecha_modificacion": time.Now().UTC(),
 		}
 		if resolveErr := w.resolver.resolveProductRow(ctx, row); resolveErr != nil {
-			failedJobs = append(failedJobs, fmt.Sprintf("%d:%s", job.ID, payload.ProdID))
+			failures.RecordFailure(payload.ProdID, resolveErr)
 			continue
 		}
 
@@ -437,18 +444,18 @@ func (w *ImageSyncWorker) retryQueuedUploads(ctx context.Context) error {
 		}
 
 		if upsertErr := w.remotePG.UpsertRows(ctx, "public", w.remoteTable, []map[string]interface{}{row}, []string{"prod_id"}); upsertErr != nil {
-			failedJobs = append(failedJobs, fmt.Sprintf("%d:%s", job.ID, payload.ProdID))
+			failures.RecordFailure(payload.ProdID, upsertErr)
 			continue
 		}
 
 		_ = w.queue.Delete(ctx, job.ID)
-		w.runtime.AddLog(fmt.Sprintf("image_sync: retry OK prod_id=%s", payload.ProdID))
+		retryOK++
 	}
 
-	if len(failedJobs) > 0 {
-		return fmt.Errorf("queued image jobs still failing: %s", strings.Join(failedJobs, ", "))
+	if retryOK > 0 && w.runtime != nil {
+		w.runtime.AddLog(fmt.Sprintf("image_sync: reintentos OK=%d", retryOK))
 	}
-	return nil
+	return failures
 }
 
 func (w *ImageSyncWorker) loadCheckpoint(ctx context.Context) (time.Time, error) {
@@ -597,9 +604,13 @@ func resolveLocalImagePath(basePath, imagePath string) (string, error) {
 		return "", fmt.Errorf("ruta no local: %s", trimmed)
 	}
 
-	candidate := filepath.Clean(trimmed)
+	candidate := normalizeLocalImagePath(trimmed)
 	if _, err := os.Stat(candidate); err == nil {
 		return candidate, nil
+	}
+
+	if filepath.IsAbs(candidate) {
+		return "", fmt.Errorf("archivo no encontrado: %s", candidate)
 	}
 
 	base := strings.TrimSpace(basePath)
@@ -607,12 +618,26 @@ func resolveLocalImagePath(basePath, imagePath string) (string, error) {
 		return "", fmt.Errorf("archivo no encontrado: %s", candidate)
 	}
 
+	normalizedBase := normalizeLocalImagePath(base)
 	relative := strings.TrimLeft(strings.ReplaceAll(trimmed, `\`, "/"), "/")
-	joined := filepath.Clean(filepath.Join(base, filepath.FromSlash(relative)))
+	if normalizedBase != "" {
+		baseSlash := strings.TrimLeft(strings.ReplaceAll(normalizedBase, `\`, "/"), "/")
+		if strings.HasPrefix(strings.ToLower(relative), strings.ToLower(baseSlash)+"/") {
+			relative = strings.TrimPrefix(relative, baseSlash)
+			relative = strings.TrimPrefix(relative, "/")
+		}
+	}
+
+	joined := filepath.Clean(filepath.Join(normalizedBase, filepath.FromSlash(relative)))
 	if _, err := os.Stat(joined); err != nil {
 		return "", fmt.Errorf("archivo no encontrado: %s", joined)
 	}
 	return joined, nil
+}
+
+func normalizeLocalImagePath(value string) string {
+	slashNormalized := strings.ReplaceAll(strings.TrimSpace(value), `\`, "/")
+	return filepath.Clean(filepath.FromSlash(slashNormalized))
 }
 
 func buildStorageObjectPath(prodID, filePath string) string {

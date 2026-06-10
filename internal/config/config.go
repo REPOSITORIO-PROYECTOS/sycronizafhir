@@ -82,7 +82,7 @@ func Load() (Config, error) {
 		DBSourcePriority:    readCSVWithDefault("DB_SOURCE_PRIORITY", []string{"docker", "local"}),
 		SQLitePath:          sqlitePath,
 		SupabaseURL:         os.Getenv("SUPABASE_URL"),
-		SupabaseServiceRole: os.Getenv("SUPABASE_SERVICE_ROLE_KEY"),
+		SupabaseServiceRole: resolveSupabaseServiceRoleKey(),
 		SupabaseRealtimeURL: os.Getenv("SUPABASE_REALTIME_URL"),
 		SupabaseDBHost:      os.Getenv("HOST_SUPABASE"),
 		SupabaseDBPort:      readIntOrDefaultNoError("PUERTO_SUPABASE", 5432),
@@ -132,6 +132,10 @@ func Load() (Config, error) {
 
 	if isPlaceholderSecret(cfg.SupabaseServiceRole) {
 		return Config{}, errors.New("SUPABASE_SERVICE_ROLE_KEY is using a placeholder value")
+	}
+
+	if err := validateSupabaseServiceRoleKey(cfg.SupabaseServiceRole); err != nil {
+		return Config{}, err
 	}
 
 	if cfg.ImageSyncEnabled && strings.TrimSpace(cfg.SupabaseURL) == "" {

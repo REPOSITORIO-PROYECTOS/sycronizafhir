@@ -3,6 +3,7 @@ package sync
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -71,6 +72,46 @@ func TestResolveLocalImagePathRelative(t *testing.T) {
 	}
 	if got != barePath {
 		t.Fatalf("expected %q, got %q", barePath, got)
+	}
+}
+
+func TestResolveLocalImagePathAbsoluteWithoutDoubling(t *testing.T) {
+	t.Parallel()
+
+	base := filepath.Join(t.TempDir(), "Sys_Image")
+	nestedDir := filepath.Join(base, "Fotos", "Productos")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	imagePath := filepath.Join(nestedDir, "0BONQ2.jpg")
+	if err := os.WriteFile(imagePath, []byte("jpeg"), 0o644); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
+
+	got, err := resolveLocalImagePath(base, imagePath)
+	if err != nil {
+		t.Fatalf("resolve absolute path: %v", err)
+	}
+	if got != imagePath {
+		t.Fatalf("expected %q, got %q", imagePath, got)
+	}
+
+	forwardSlash := strings.ReplaceAll(imagePath, `\`, "/")
+	got, err = resolveLocalImagePath(base, forwardSlash)
+	if err != nil {
+		t.Fatalf("resolve absolute forward slash path: %v", err)
+	}
+	if got != imagePath {
+		t.Fatalf("expected %q, got %q", imagePath, got)
+	}
+
+	missingAbsolute := filepath.Join(base, "Fotos", "Productos", "missing.jpg")
+	_, err = resolveLocalImagePath(base, missingAbsolute)
+	if err == nil {
+		t.Fatal("expected missing absolute path error")
+	}
+	if strings.Contains(err.Error(), base+string(filepath.Separator)+base) {
+		t.Fatalf("absolute missing path must not double base, got %v", err)
 	}
 }
 

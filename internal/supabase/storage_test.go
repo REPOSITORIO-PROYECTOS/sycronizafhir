@@ -53,6 +53,25 @@ func TestStorageClientPublicURL(t *testing.T) {
 	}
 }
 
+func TestStorageClientUploadObjectRLSErrorHint(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}`))
+	}))
+	defer server.Close()
+
+	client := NewStorageClient(server.URL, "anon-like-key")
+	err := client.UploadObject(context.Background(), "productos", "00201224.jpg", "image/jpeg", []byte("image-bytes"))
+	if err == nil {
+		t.Fatal("expected upload error")
+	}
+	if !strings.Contains(err.Error(), "SUPABASE_SERVICE_ROLE_KEY") {
+		t.Fatalf("expected service role hint, got %v", err)
+	}
+}
+
 func TestContentTypeFromExtension(t *testing.T) {
 	t.Parallel()
 
