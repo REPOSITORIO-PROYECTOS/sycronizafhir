@@ -44,6 +44,10 @@ func (w *InboundWorker) Run(ctx context.Context) {
 
 	go w.retryLoop(ctx, 30*time.Second)
 
+	backoff := newReconnectBackoff(5*time.Second, 60*time.Second)
+	failureLog := newReconnectFailureLog()
+	connected := false
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -51,13 +55,43 @@ func (w *InboundWorker) Run(ctx context.Context) {
 		default:
 			err := w.realtimeClient.ListenPedidos(ctx, func(pedido models.Pedido) error {
 				return w.insertOrQueue(ctx, pedido)
-			})
-			if err != nil {
-				log.Printf("realtime listen failed, reconnecting in 5s: %v", err)
-				w.runtime.SetComponentStatus("inbound", "error", err.Error())
-				time.Sleep(5 * time.Second)
-			} else {
+			}, func() {
+				backoff.Reset()
+				failureLog.Reset(w.runtime, "inbound")
+				connected = true
 				w.runtime.SetComponentStatus("inbound", "running", "realtime conectado")
+			})
+			if err == nil {
+				return
+			}
+
+			wait := backoff.Next()
+			summary := supabase.NormalizeRealtimeError(err)
+			failureLog.Record(w.runtime, "inbound", summary, wait)
+
+			if supabase.IsRealtimeTransientError(err) {
+				w.runtime.SetComponentStatus(
+					"inbound",
+					"reconnecting",
+					fmt.Sprintf("reconectando en %s: %s", wait, summary),
+				)
+			} else {
+				w.runtime.SetComponentStatus("inbound", "error", summary)
+			}
+
+			if connected {
+				log.Printf("realtime listen lost, reconnecting in %s: %v", wait, err)
+			} else {
+				log.Printf("realtime listen failed, reconnecting in %s: %v", wait, err)
+			}
+			connected = false
+
+			timer := time.NewTimer(wait)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
 			}
 		}
 	}

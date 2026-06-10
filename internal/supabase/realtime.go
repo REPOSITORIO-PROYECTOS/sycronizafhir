@@ -4,14 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 
 	"sycronizafhir/internal/models"
+)
+
+const (
+	realtimeHeartbeatInterval = 25 * time.Second
+	realtimeReadTimeout       = 90 * time.Second
+	realtimeHandshakeTimeout  = 30 * time.Second
 )
 
 type RealtimeClient struct {
@@ -42,7 +51,11 @@ func NewRealtimeClient(realtimeURL, apiKey, channel, schema, table string) *Real
 	}
 }
 
-func (c *RealtimeClient) ListenPedidos(ctx context.Context, onPedido func(models.Pedido) error) error {
+func (c *RealtimeClient) ListenPedidos(
+	ctx context.Context,
+	onPedido func(models.Pedido) error,
+	onConnected func(),
+) error {
 	rawURL := strings.TrimRight(c.realtimeURL, "/")
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -53,22 +66,45 @@ func (c *RealtimeClient) ListenPedidos(ctx context.Context, onPedido func(models
 	header.Set("apikey", c.apiKey)
 	header.Set("Authorization", "Bearer "+c.apiKey)
 
-	conn, _, err := websocket.DefaultDialer.Dial(parsed.String(), header)
+	dialer := &websocket.Dialer{
+		HandshakeTimeout: realtimeHandshakeTimeout,
+		NetDialContext: (&net.Dialer{
+			Timeout:   realtimeHandshakeTimeout,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+	}
+
+	conn, _, err := dialer.DialContext(ctx, parsed.String(), header)
 	if err != nil {
 		return fmt.Errorf("dial realtime websocket: %w", err)
 	}
 	defer conn.Close()
 
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(realtimeReadTimeout))
+	})
+
 	if err = c.joinChannel(conn); err != nil {
 		return err
 	}
+
+	if onConnected != nil {
+		onConnected()
+	}
+
+	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
+	defer cancelHeartbeat()
+
+	var heartbeatRef atomic.Uint64
+	heartbeatRef.Store(1)
+	go c.heartbeatLoop(heartbeatCtx, conn, &heartbeatRef)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		default:
-			if err = conn.SetReadDeadline(time.Now().Add(45 * time.Second)); err != nil {
+			if err = conn.SetReadDeadline(time.Now().Add(realtimeReadTimeout)); err != nil {
 				return fmt.Errorf("set read deadline: %w", err)
 			}
 
@@ -79,6 +115,10 @@ func (c *RealtimeClient) ListenPedidos(ctx context.Context, onPedido func(models
 
 			var envelope realtimeEnvelope
 			if unmarshalErr := json.Unmarshal(message, &envelope); unmarshalErr != nil {
+				continue
+			}
+
+			if envelope.Event == "phx_reply" || envelope.Event == "heartbeat" || envelope.Event == "system" {
 				continue
 			}
 
@@ -93,6 +133,29 @@ func (c *RealtimeClient) ListenPedidos(ctx context.Context, onPedido func(models
 
 			if err = onPedido(pedido); err != nil {
 				return err
+			}
+		}
+	}
+}
+
+func (c *RealtimeClient) heartbeatLoop(ctx context.Context, conn *websocket.Conn, ref *atomic.Uint64) {
+	ticker := time.NewTicker(realtimeHeartbeatInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			nextRef := ref.Add(1)
+			payload := map[string]interface{}{
+				"topic":   "phoenix",
+				"event":   "heartbeat",
+				"payload": map[string]interface{}{},
+				"ref":     strconv.FormatUint(nextRef, 10),
+			}
+			if err := conn.WriteJSON(payload); err != nil {
+				return
 			}
 		}
 	}
@@ -123,4 +186,14 @@ func (c *RealtimeClient) joinChannel(conn *websocket.Conn) error {
 	}
 
 	return nil
+}
+
+// IsRealtimeTransientError reports whether a realtime listen failure is likely temporary.
+func IsRealtimeTransientError(err error) bool {
+	return isRealtimeTransientError(err)
+}
+
+// NormalizeRealtimeError returns a short user-facing message for logs and UI.
+func NormalizeRealtimeError(err error) string {
+	return normalizeRealtimeError(err)
 }

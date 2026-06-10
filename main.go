@@ -280,18 +280,30 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 			result.Metrics["sync_tables_detected"] = fmt.Sprintf("%d", len(tables))
 		}
 
-		if status, message, exists := rt.GetComponentState("inbound"); exists && status == "error" {
-			reason := "Inbound presenta error reciente."
-			if strings.Contains(strings.ToLower(message), "bad handshake") {
-				reason = "Realtime rechazado (bad handshake). Causa probable: SUPABASE_SERVICE_ROLE_KEY invalida/placeholder o canal/schema/table incorrectos."
-			}
-			result.Issues = append(result.Issues, monitor.ScanIssue{
-				Level:     "warn",
-				Component: "realtime_inbound",
-				Message:   reason,
-			})
-			if result.Status == "ok" {
-				result.Status = "warn"
+		if status, message, exists := rt.GetComponentState("inbound"); exists {
+			switch status {
+			case "reconnecting":
+				result.Issues = append(result.Issues, monitor.ScanIssue{
+					Level:     "warn",
+					Component: "realtime_inbound",
+					Message:   "Realtime reconectando tras corte de red transitorio.",
+				})
+				if result.Status == "ok" {
+					result.Status = "warn"
+				}
+			case "error":
+				reason := "Inbound presenta error reciente."
+				if strings.Contains(strings.ToLower(message), "bad handshake") {
+					reason = "Realtime rechazado (bad handshake). Causa probable: SUPABASE_SERVICE_ROLE_KEY invalida/placeholder o canal/schema/table incorrectos."
+				}
+				result.Issues = append(result.Issues, monitor.ScanIssue{
+					Level:     "warn",
+					Component: "realtime_inbound",
+					Message:   reason,
+				})
+				if result.Status == "ok" {
+					result.Status = "warn"
+				}
 			}
 		}
 
