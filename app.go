@@ -126,6 +126,7 @@ func (a *App) startup(ctx context.Context) {
 		wailsruntime.EventsEmit(a.ctx, event.Topic, event.Payload)
 	})
 
+	a.wireSupportRecorder()
 	a.runtime.AddLog("frontend conectado")
 	go a.resumeBootstrapIfNeeded()
 	a.loadPersistedAuditReport()

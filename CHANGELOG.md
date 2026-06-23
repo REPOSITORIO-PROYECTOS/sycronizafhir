@@ -3,6 +3,15 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.5.11] - 2026-06-23
+
+### Agregado
+
+- **Soporte**: vista **Soporte** en el Control Center para generar reportes ZIP (estado, config, escaneo, logs) y abrir carpeta de errores/incidentes.
+- **Registro de incidentes**: errores/warns de componentes y escaneos se guardan en `%APPDATA%\sycronizafhir\errors\`.
+- **Log a archivo**: salida adicional del runtime en AppData para diagnóstico en campo.
+- **Checklist operativo**: `docs/CHECKLIST_OPERACION_SYNC.md` con pasos P0–P3 para máquinas en producción.
+
 ## [1.5.10] - 2026-06-10
 
 ### Corregido

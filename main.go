@@ -23,6 +23,7 @@ import (
 	"sycronizafhir/internal/db"
 	"sycronizafhir/internal/monitor"
 	"sycronizafhir/internal/supabase"
+	"sycronizafhir/internal/support"
 	syncworker "sycronizafhir/internal/sync"
 	"sycronizafhir/internal/updater"
 )
@@ -83,7 +84,8 @@ func runBackground() {
 	}
 
 	rt := monitor.NewRuntime()
-	log.SetOutput(io.MultiWriter(os.Stdout, rt.Writer()))
+	fileLog := support.NewFileLogWriter()
+	log.SetOutput(io.MultiWriter(os.Stdout, rt.Writer(), fileLog))
 	rt.SetMeta("app_name", "sycronizafhir")
 	rt.SetMeta("mode", "background")
 
@@ -136,7 +138,8 @@ func runWithWindow() {
 	}
 
 	rt := monitor.NewRuntime()
-	log.SetOutput(io.MultiWriter(os.Stdout, rt.Writer()))
+	fileLog := support.NewFileLogWriter()
+	log.SetOutput(io.MultiWriter(os.Stdout, rt.Writer(), fileLog))
 	rt.SetComponentStatus("app", "running", "iniciando servicio")
 	rt.SetMeta("app_name", "sycronizafhir")
 	rt.SetMeta("mode", "window")

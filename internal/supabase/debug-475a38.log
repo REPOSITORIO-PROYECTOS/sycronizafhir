@@ -1,8 +1,0 @@
-{"data":{"len":3,"normType":"[]int32","rawType":"[]interface {}"},"hypothesisId":"B","location":"pg_values.go:NormalizeParamValue","message":"normalized []interface{}","sessionId":"475a38","timestamp":1780703783728}
-{"data":{"len":15,"normType":"[]int32","rawType":"[]interface {}"},"hypothesisId":"B","location":"pg_values.go:NormalizeParamValue","message":"normalized []interface{}","sessionId":"475a38","timestamp":1780703783733}
-{"data":{"len":3,"normType":"[]int32","rawType":"[]int"},"hypothesisId":"B","location":"pg_values.go:NormalizeParamValue","message":"normalized typed slice","sessionId":"475a38","timestamp":1780703783737}
-{"data":{"len":3,"normType":"[]int32","rawType":"[]interface {}"},"hypothesisId":"B","location":"pg_values.go:NormalizeParamValue","message":"normalized []interface{}","sessionId":"475a38","timestamp":1780703783743}
-{"data":{"len":3,"normType":"[]int32"},"hypothesisId":"B","location":"pg_values.go:NormalizeParamValue","message":"parsed postgres array literal","sessionId":"475a38","timestamp":1780703783745}
-{"data":{"len":2,"normType":"[]string","rawType":"[]interface {}"},"hypothesisId":"B","location":"pg_values.go:NormalizeParamValue","message":"normalized []interface{}","sessionId":"475a38","timestamp":1780703783745}
-{"data":{"len":0,"normType":"[]int32","rawType":"[]interface {}"},"hypothesisId":"B","location":"pg_values.go:NormalizeParamValue","message":"normalized []interface{}","sessionId":"475a38","timestamp":1780703783748}
-{"data":{"len":2,"normType":"[]int32","rawType":"[]interface {}"},"hypothesisId":"B","location":"pg_values.go:NormalizeParamValue","message":"normalized []interface{}","sessionId":"475a38","timestamp":1780703783749}

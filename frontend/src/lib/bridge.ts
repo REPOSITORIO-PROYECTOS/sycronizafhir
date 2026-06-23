@@ -16,6 +16,8 @@ import type {
   ImageSyncResult,
   ImageSyncStats,
   PendingProductImagesSummary,
+  SupportInfo,
+  SupportReportResult,
 } from "@/types/domain";
 
 interface AppBindings {
@@ -49,6 +51,9 @@ interface AppBindings {
   SyncProductImagesNow: (force: boolean) => Promise<ImageSyncResult>;
   GetImageSyncStatus: () => Promise<ImageSyncStats>;
   GetPendingProductImages: () => Promise<PendingProductImagesSummary>;
+  GetSupportInfo: () => Promise<SupportInfo>;
+  OpenSupportFolder: () => Promise<string>;
+  CreateSupportReport: (input: { description: string }) => Promise<SupportReportResult>;
 }
 
 interface WailsRuntime {
@@ -424,6 +429,33 @@ export const bridge = {
       local_base: "C:\\Sys_Image",
       preview_limit: 50,
       items: [],
+    };
+  },
+  async getSupportInfo(): Promise<SupportInfo> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.GetSupportInfo();
+    }
+    return {
+      errors_folder: "C:\\Users\\usuario\\AppData\\Roaming\\sycronizafhir\\errores",
+      reports_folder:
+        "C:\\Users\\usuario\\AppData\\Roaming\\sycronizafhir\\errores\\reportes",
+      recent_files: [],
+    };
+  },
+  async openSupportFolder(): Promise<string> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.OpenSupportFolder();
+    }
+    return "ok";
+  },
+  async createSupportReport(description: string): Promise<SupportReportResult> {
+    if (isWailsAvailable()) {
+      return wailsWindow.go!.main!.App!.CreateSupportReport({ description });
+    }
+    return {
+      success: true,
+      message: "Reporte mock generado (modo navegador)",
+      zip_path: "reporte-soporte-mock.zip",
     };
   },
   on(event: string, handler: (payload: unknown) => void): () => void {

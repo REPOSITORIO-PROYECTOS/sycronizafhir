@@ -215,3 +215,22 @@ export interface ImageSyncResult {
   message: string;
   stats: ImageSyncStats;
 }
+
+export interface SupportFileInfo {
+  name: string;
+  path: string;
+  size_bytes: number;
+  modified_at: string;
+}
+
+export interface SupportInfo {
+  errors_folder: string;
+  reports_folder: string;
+  recent_files: SupportFileInfo[];
+}
+
+export interface SupportReportResult {
+  success: boolean;
+  message: string;
+  zip_path?: string;
+}

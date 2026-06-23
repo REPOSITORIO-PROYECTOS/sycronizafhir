@@ -7,6 +7,7 @@
 *.db
 *.sqlite
 reports/
+internal/supabase/debug-*.log
 
 # Build outputs
 *.exe

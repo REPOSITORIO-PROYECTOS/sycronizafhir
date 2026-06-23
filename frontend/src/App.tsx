@@ -7,6 +7,7 @@ import { ConnectionsView } from "@/views/ConnectionsView";
 import { ScanView } from "@/views/ScanView";
 import { SyncView } from "@/views/SyncView";
 import { LogsView } from "@/views/LogsView";
+import { SupportView } from "@/views/SupportView";
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
           <Route path="/sincronizacion" element={<SyncView />} />
           <Route path="/escaneos" element={<ScanView />} />
           <Route path="/logs" element={<LogsView />} />
+          <Route path="/soporte" element={<SupportView />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AppShell>

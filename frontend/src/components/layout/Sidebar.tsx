@@ -8,6 +8,7 @@ import {
   ScrollText,
   Activity,
   RefreshCw,
+  LifeBuoy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { bridge } from "@/lib/bridge";
@@ -19,6 +20,7 @@ const NAV = [
   { to: "/sincronizacion", label: "Sincronización", icon: RefreshCw },
   { to: "/escaneos", label: "Escaneos", icon: Radar },
   { to: "/logs", label: "Logs", icon: ScrollText },
+  { to: "/soporte", label: "Soporte", icon: LifeBuoy },
 ] as const;
 
 export function Sidebar() {
