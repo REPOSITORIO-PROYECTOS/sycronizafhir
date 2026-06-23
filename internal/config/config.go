@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -43,7 +44,7 @@ type Config struct {
 }
 
 func Load() (Config, error) {
-	_ = godotenv.Load()
+	loadDotEnvFiles()
 	applyEmbeddedDefaults()
 
 	intervalSeconds, err := readIntWithDefault("OUTBOUND_INTERVAL_SECONDS", 60)
@@ -304,4 +305,14 @@ func isPlaceholderSecret(value string) bool {
 	}
 
 	return false
+}
+
+// loadDotEnvFiles loads .env from the executable directory first (installed app in
+// Program Files) and then from the process working directory (dev: repo root).
+// godotenv does not override variables already set in the environment.
+func loadDotEnvFiles() {
+	if exePath, err := os.Executable(); err == nil {
+		_ = godotenv.Load(filepath.Join(filepath.Dir(exePath), ".env"))
+	}
+	_ = godotenv.Load()
 }

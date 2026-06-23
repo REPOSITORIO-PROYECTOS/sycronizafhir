@@ -21,7 +21,7 @@ function Ensure-AutoStartTask {
 
     try {
         $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-        $action = New-ScheduledTaskAction -Execute $ExePath -Argument "--background"
+        $action = New-ScheduledTaskAction -Execute $ExePath -Argument "--background" -WorkingDirectory (Split-Path -Parent $ExePath)
         $trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
         $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -StartWhenAvailable -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew

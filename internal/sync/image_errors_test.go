@@ -6,6 +6,20 @@ import (
 	"testing"
 )
 
+func TestIsSkippableImageSyncError(t *testing.T) {
+	t.Parallel()
+
+	if !isSkippableImageSyncError(fmt.Errorf("archivo no encontrado: C:\\img\\a.jpg")) {
+		t.Fatal("expected file missing to be skippable")
+	}
+	if !isSkippableImageSyncError(fmt.Errorf("ruta no local: https://x")) {
+		t.Fatal("expected path invalid to be skippable")
+	}
+	if isSkippableImageSyncError(fmt.Errorf(`storage upload failed status=403 rls`)) {
+		t.Fatal("expected rls error not skippable")
+	}
+}
+
 func TestClassifyImageSyncError(t *testing.T) {
 	t.Parallel()
 

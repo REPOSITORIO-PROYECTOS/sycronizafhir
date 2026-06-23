@@ -3,6 +3,15 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.5.10] - 2026-06-10
+
+### Corregido
+
+- **image_sync**: imágenes inexistentes en disco (`file_missing` / ruta inválida) se omiten sin cola de reintentos ni contarse como fallo.
+- **Config instalada**: `.env` se carga desde la carpeta del ejecutable (`Program Files\sycronizafhir`), no solo del directorio de trabajo del proceso.
+- **Autoarranque**: tarea programada `sycronizafhir-auto-start` usa `WorkingDirectory` en la carpeta de instalación.
+- **Clave embebida**: `SUPABASE_SERVICE_ROLE_KEY` actualizada a `sb_secret_` (antes estaba `sb_publishable_` y causaba `rls_auth`).
+
 ## [1.5.5] - 2026-06-09
 
 ### Agregado

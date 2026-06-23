@@ -213,6 +213,15 @@ func (c *imageSyncFailureCollector) LogCycleSummary(runtime *monitor.Runtime, up
 	}
 }
 
+func isSkippableImageSyncError(err error) bool {
+	switch classifyImageSyncError(err) {
+	case imageSyncErrFileMissing, imageSyncErrPathInvalid:
+		return true
+	default:
+		return false
+	}
+}
+
 func classifyImageSyncError(err error) imageSyncErrorCategory {
 	if err == nil {
 		return imageSyncErrOther

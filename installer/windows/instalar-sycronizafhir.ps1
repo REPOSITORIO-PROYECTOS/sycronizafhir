@@ -99,10 +99,13 @@ function Install-App {
 }
 
 function Register-StartupTask {
-    param([string]$ExePath)
+    param(
+        [string]$ExePath,
+        [string]$InstallDir
+    )
 
     $taskName = "sycronizafhir-auto-start"
-    $action = New-ScheduledTaskAction -Execute $ExePath -Argument "--background"
+    $action = New-ScheduledTaskAction -Execute $ExePath -Argument "--background" -WorkingDirectory $InstallDir
     $triggerStartup = New-ScheduledTaskTrigger -AtStartup
     $triggerLogon = New-ScheduledTaskTrigger -AtLogOn
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
@@ -185,7 +188,7 @@ try {
     Copy-Item (Join-Path $sourceDir "github-update-config.json") (Join-Path $installDir "github-update-config.json") -Force
 
     Write-Step "Registrando inicio automático con Windows"
-    Register-StartupTask -ExePath $exePath
+    Register-StartupTask -ExePath $exePath -InstallDir $installDir
     Write-Host "[OK] Tarea programada creada: sycronizafhir-auto-start" -ForegroundColor Green
 
     Write-Step "Registrando auto-actualización desde GitHub"

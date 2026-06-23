@@ -362,6 +362,10 @@ func (w *ImageSyncWorker) runCycle(ctx context.Context, force bool) error {
 			}
 
 			if resolveErr := w.resolver.resolveProductRow(ctx, row); resolveErr != nil {
+				if isSkippableImageSyncError(resolveErr) {
+					stats.Skipped++
+					continue
+				}
 				stats.Failed++
 				failures.RecordFailure(candidate.ProdID, resolveErr)
 				payload, marshalErr := json.Marshal(queuedImagePayload{
@@ -433,6 +437,10 @@ func (w *ImageSyncWorker) retryQueuedUploads(ctx context.Context) *imageSyncFail
 			"fecha_modificacion": time.Now().UTC(),
 		}
 		if resolveErr := w.resolver.resolveProductRow(ctx, row); resolveErr != nil {
+			if isSkippableImageSyncError(resolveErr) {
+				_ = w.queue.Delete(ctx, job.ID)
+				continue
+			}
 			failures.RecordFailure(payload.ProdID, resolveErr)
 			continue
 		}
