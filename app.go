@@ -256,19 +256,28 @@ func (a *App) GetLastDataAudit() syncworker.DataAuditReport {
 	memReport := a.lastAudit
 	a.auditMu.Unlock()
 
-	if !memReport.AuditedAt.IsZero() {
-		return memReport
+	var persisted syncworker.DataAuditReport
+	if a.queue != nil {
+		report, exists, err := syncworker.LoadAuditReport(context.Background(), a.queue)
+		if err == nil && exists {
+			persisted = report
+		}
 	}
 
-	if a.queue == nil {
-		return syncworker.DataAuditReport{}
+	newest := memReport
+	if persisted.AuditedAt.After(newest.AuditedAt) {
+		newest = persisted
+		a.auditMu.Lock()
+		if persisted.AuditedAt.After(a.lastAudit.AuditedAt) {
+			a.lastAudit = persisted
+		}
+		a.auditMu.Unlock()
 	}
 
-	report, exists, err := syncworker.LoadAuditReport(context.Background(), a.queue)
-	if err != nil || !exists {
+	if newest.AuditedAt.IsZero() {
 		return syncworker.DataAuditReport{}
 	}
-	return report
+	return newest
 }
 
 func (a *App) SyncSelectedTables(tableNames []string) SyncSelectedResult {

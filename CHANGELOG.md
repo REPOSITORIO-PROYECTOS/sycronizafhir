@@ -3,6 +3,14 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.5.12] - 2026-06-30
+
+### Corregido
+
+- **Panel Sincronización**: `GetLastDataAudit` devuelve siempre la auditoría más reciente (memoria o SQLite), no una copia vieja en memoria.
+- **Panel Sincronización**: refresco automático al terminar auditoría programada, subidas outbound o ciclos de imágenes; botón **Actualizar panel**.
+- **Panel Sincronización**: columnas renombradas (Tabla local / Filas nube) y texto que distingue outbound (~1 min) vs auditoría (~6 h).
+
 ## [1.5.11] - 2026-06-23
 
 ### Agregado

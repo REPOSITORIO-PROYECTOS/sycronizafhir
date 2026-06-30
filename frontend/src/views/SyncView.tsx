@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   RefreshCw,
@@ -16,10 +16,11 @@ import { Topbar } from "@/components/layout/Topbar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { bridge } from "@/lib/bridge";
+import { bridge, Topics } from "@/lib/bridge";
 import type {
   AvailableSyncTable,
   ImageSyncErrorSummary,
+  MetaEventPayload,
   PendingProductImage,
   TableAuditResult,
 } from "@/types/domain";
@@ -188,6 +189,42 @@ export function SyncView() {
     setSelectedTables(enabled);
   }, [availableTables]);
 
+  const refreshSyncPanels = useCallback(async () => {
+    await Promise.all([
+      refetchAudit(),
+      refetchImageStatus(),
+      refetchPendingImages(),
+      queryClient.invalidateQueries({ queryKey: ["last-data-audit"] }),
+      queryClient.invalidateQueries({ queryKey: ["pending-product-images"] }),
+      queryClient.invalidateQueries({ queryKey: ["image-sync-status"] }),
+    ]);
+  }, [queryClient, refetchAudit, refetchImageStatus, refetchPendingImages]);
+
+  useEffect(() => {
+    const unsubMeta = bridge.on(Topics.Meta, (payload) => {
+      const data = payload as MetaEventPayload | undefined;
+      if (data?.key === "audit_last_run") {
+        void refreshSyncPanels();
+      }
+    });
+
+    const unsubLog = bridge.on(Topics.Log, (payload) => {
+      const line = typeof payload === "string" ? payload : "";
+      if (
+        line.includes("outbound: subidas") ||
+        line.includes("auditoria (") ||
+        line.includes("image_sync:")
+      ) {
+        void refreshSyncPanels();
+      }
+    });
+
+    return () => {
+      unsubMeta();
+      unsubLog();
+    };
+  }, [refreshSyncPanels]);
+
   const toggleTable = (name: string) => {
     setSelectedTables((prev) => {
       const next = prev.includes(name)
@@ -229,7 +266,19 @@ export function SyncView() {
                 {syncConfig?.auto_sync_on_audit ? "activado" : "desactivado"}
               </p>
               {lastAudit?.audited_at ? (
-                <p>Última: {new Date(lastAudit.audited_at).toLocaleString()}</p>
+                <>
+                  <p>Última: {new Date(lastAudit.audited_at).toLocaleString()}</p>
+                  <p className="text-xs">
+                    Origen:{" "}
+                    {lastAudit.trigger === "scheduled"
+                      ? "automática (cada 6 h)"
+                      : lastAudit.trigger === "post-sync"
+                        ? "tras subir tablas"
+                        : lastAudit.trigger === "manual"
+                          ? "manual (Auditar ahora)"
+                          : lastAudit.trigger}
+                  </p>
+                </>
               ) : (
                 <p>Última: pendiente</p>
               )}
@@ -268,10 +317,16 @@ export function SyncView() {
                 Estado
               </CardTitle>
             </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
+            <CardContent className="text-sm text-muted-foreground space-y-1">
               {hasPendingDiff
                 ? "Hay diferencias pendientes en tablas seleccionadas."
                 : "Sin diferencias detectadas en la última auditoría."}
+              <p className="text-xs">
+                Outbound (cada ~1 min) sube cambios locales con{" "}
+                <span className="font-mono">fecha_modificacion</span> reciente — no depende de
+                esta auditoría. La tabla de abajo se actualiza sola tras auditoría automática o
+                subidas.
+              </p>
             </CardContent>
           </Card>
         </div>
@@ -479,6 +534,14 @@ export function SyncView() {
               </Button>
               <Button
                 variant="outline"
+                size="default"
+                onClick={() => void refreshSyncPanels()}
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Actualizar panel
+              </Button>
+              <Button
+                variant="outline"
                 disabled={auditMutation.isPending}
                 onClick={() => auditMutation.mutate(true)}
               >
@@ -519,10 +582,10 @@ export function SyncView() {
               <table className="w-full min-w-[900px] text-left">
                 <thead>
                   <tr className="border-b border-border/60 text-xs uppercase tracking-wider text-muted-foreground">
-                    <th className="pb-2 pr-3">Local</th>
-                    <th className="pb-2 pr-3">Remoto</th>
-                    <th className="pb-2 pr-3 text-right">Local</th>
-                    <th className="pb-2 pr-3 text-right">Remoto</th>
+                    <th className="pb-2 pr-3">Tabla local</th>
+                    <th className="pb-2 pr-3">Tabla nube</th>
+                    <th className="pb-2 pr-3 text-right">Filas local</th>
+                    <th className="pb-2 pr-3 text-right">Filas nube</th>
                     <th className="pb-2 pr-3 text-right">Faltantes</th>
                     <th className="pb-2 pr-3 text-right">Cambiadas</th>
                     <th className="pb-2 pr-3 text-right">En sync</th>
