@@ -3,9 +3,17 @@
 .env.local
 .env.*.local
 
+# Support / incident artifacts (never commit)
+_support_report/
+**/incidentes.log
+**/incidentes/
+**/reportes/
+
 # Databases / runtime state
 *.db
 *.sqlite
+*.dump
+exports/
 reports/
 internal/supabase/debug-*.log
 

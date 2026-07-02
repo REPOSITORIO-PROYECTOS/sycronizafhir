@@ -2,7 +2,7 @@
 
 Documento de consulta rápida: qué está listo en el código, qué falta en la máquina de producción (ej. Mica) y dónde hacer cada paso.
 
-**Versión repo:** 1.5.10 · **Última revisión:** 2026-06-23
+**Versión repo:** 1.5.13 · **Última revisión:** 2026-07-02
 
 ---
 
@@ -18,6 +18,7 @@ Documento de consulta rápida: qué está listo en el código, qué falta en la 
 | Fix clave embebida `sb_publishable_` → `sb_secret_` (RLS imágenes) | ✅ v1.5.10 | `CHANGELOG.md` |
 | Omitir `file_missing` sin reencolar | ✅ v1.5.10 | `internal/sync/image_errors.go` |
 | `.env` desde carpeta del ejecutable | ✅ v1.5.10 | `internal/config/config.go` |
+| Stock `productos_depositos` + image_sync backlog por offset | ✅ v1.5.13 | `CHANGELOG.md`, `sql/004_*` |
 | SQL bucket Storage `productos` | ✅ Listo | `sql/003_supabase_storage_productos.sql` |
 | SQL tablas con `fecha_modificacion` | ✅ Listo | `sql/000_supabase_prep_completo.sql` |
 | SQL stock `productos_depositos` (nube) | ✅ Listo | `sql/004_productos_depositos_supabase.sql` |
