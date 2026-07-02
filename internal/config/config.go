@@ -37,9 +37,10 @@ type Config struct {
 	ExcludeTables       []string
 	BootstrapChunkSize  int
 	AuditInterval       time.Duration
-	ImageSyncEnabled    bool
-	ImageSyncInterval   time.Duration
-	ImageLocalBasePath  string
+	ImageSyncEnabled       bool
+	ImageSyncInterval      time.Duration
+	ImageSyncAutoBatch     int
+	ImageLocalBasePath     string
 	StorageBucketProductos string
 }
 
@@ -68,6 +69,11 @@ func Load() (Config, error) {
 	}
 
 	imageSyncSeconds, err := readIntWithDefault("IMAGE_SYNC_INTERVAL_SECONDS", 300)
+	if err != nil {
+		return Config{}, err
+	}
+
+	imageSyncAutoBatch, err := readIntWithDefault("IMAGE_SYNC_AUTO_BATCH", 150)
 	if err != nil {
 		return Config{}, err
 	}
@@ -104,6 +110,7 @@ func Load() (Config, error) {
 		AuditInterval:            time.Duration(auditHours) * time.Hour,
 		ImageSyncEnabled:         readBoolWithDefault("IMAGE_SYNC_ENABLED", true),
 		ImageSyncInterval:        time.Duration(imageSyncSeconds) * time.Second,
+		ImageSyncAutoBatch:       imageSyncAutoBatch,
 		ImageLocalBasePath:       readStringWithDefault("IMAGE_LOCAL_BASE_PATH", `C:\Sys_Image`),
 		StorageBucketProductos:   readStringWithDefault("SUPABASE_STORAGE_BUCKET_PRODUCTOS", "productos"),
 	}

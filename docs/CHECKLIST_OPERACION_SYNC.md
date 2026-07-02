@@ -20,6 +20,9 @@ Documento de consulta rápida: qué está listo en el código, qué falta en la 
 | `.env` desde carpeta del ejecutable | ✅ v1.5.10 | `internal/config/config.go` |
 | SQL bucket Storage `productos` | ✅ Listo | `sql/003_supabase_storage_productos.sql` |
 | SQL tablas con `fecha_modificacion` | ✅ Listo | `sql/000_supabase_prep_completo.sql` |
+| SQL stock `productos_depositos` (nube) | ✅ Listo | `sql/004_productos_depositos_supabase.sql` |
+| SQL stock `productos_depositos` (local) | ✅ Listo | `sql/001_productos_depositos_local.sql` |
+| CLI aplicar DDL en Supabase | ✅ Listo | `cmd/apply-supabase-sql` |
 
 ---
 
@@ -40,7 +43,8 @@ Basado en informe v1.5.9 en `C:\Program Files\sycronizafhir` (Mica).
 
 | Columna | Rol | Usar ya |
 |---------|-----|---------|
-| `fecha_modificacion` | Cursor incremental (outbound) + elegibilidad de tabla | **Sí** |
+| `fecha_modificacion` | Cursor incremental (outbound) + elegibilidad de tabla | **Sí** (outbound) |
+| `fecha_modificacion` | Filtro image_sync automático | **No** (desde v1.5.13: backlog por offset + cache) |
 | `fecha_modif` + `hora_modif` | Datos de negocio legacy (productos) | Solo via hash en auditoría, **no** como cursor |
 | `ped_fecha` + `ped_hora` | Datos de negocio (pedidos) | Igual que arriba |
 
@@ -80,7 +84,10 @@ Basado en informe v1.5.9 en `C:\Program Files\sycronizafhir` (Mica).
 
 ### P3 — Triggers `fecha_modificacion` (BD local)
 
-En cada tabla sync (`clientes`, `productos`, `pedidos`, `pedidos_d`, `rubro`, `subrubro`):
+En cada tabla sync (`clientes`, `productos`, `productos_depositos`, `pedidos`, `pedidos_d`, `rubro`, `subrubro`):
+
+**Stock (`productos_depositos`):** ejecutar en Postgres local `sql/001_productos_depositos_local.sql` (o pedir al proveedor FHIR que lo aplique). En Supabase debe existir la tabla (`sql/004_productos_depositos_supabase.sql` o `apply-supabase-sql.exe`). Luego en `%APPDATA%\sycronizafhir\sync-tables.json` incluir `productos_depositos` y correr sync/bootstrap de esa tabla sola.
+
 
 ```sql
 -- Ejemplo si la columna es DATE:

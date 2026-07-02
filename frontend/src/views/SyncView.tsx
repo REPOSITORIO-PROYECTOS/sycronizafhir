@@ -339,7 +339,9 @@ export function SyncView() {
             </CardTitle>
             <CardDescription>
               Sube fotos desde rutas locales (ej. C:\Sys_Image) a Supabase Storage y actualiza
-              prod_imagen en la nube con URL pública.
+              prod_imagen en la nube con URL pública. El worker automático recorre el backlog
+              cada intervalo (sin depender de fecha_modificacion); «Subir imágenes ahora» procesa
+              todas de una vez.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

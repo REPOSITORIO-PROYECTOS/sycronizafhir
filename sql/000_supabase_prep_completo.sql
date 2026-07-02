@@ -14,7 +14,7 @@
 --        fecha_modificacion en clientes/articulos, sync_buzon_pedidos, trigger.
 --        No ejecutar en Supabase salvo que quieras el mismo buzón en la nube.
 --
---   sql/prep_supabase_minimo.sql        ← atajo: solo pedidos_d (pruebas rápidas).
+--   sql/004_productos_depositos_supabase.sql  ← stock por depósito (productos_depositos)
 --
 --   sql/002_*.sql                       ← redirección; el DDL vivo está aquí (000).
 --

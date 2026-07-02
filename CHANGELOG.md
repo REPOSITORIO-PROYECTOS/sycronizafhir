@@ -3,6 +3,20 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.5.13] - 2026-07-02
+
+### Agregado
+
+- **Stock ERP**: DDL Supabase `sql/004_productos_depositos_supabase.sql` y prep local `sql/001_productos_depositos_local.sql`.
+- **CLI** `apply-supabase-sql`: aplica DDL en Supabase usando `.env` del instalador.
+- **Sync por defecto**: `productos_depositos` en `DefaultSyncTablesConfig` (junto con `clientes` y `productos`).
+- **compare-counts**: incluye conteo `productos_depositos` local vs nube.
+- **image_sync automático**: `IMAGE_SYNC_AUTO_BATCH` (default 150) — el worker recorre todo el backlog por offset, no solo productos con `fecha_modificacion` reciente.
+
+### Corregido
+
+- **image_sync automático**: deja de usar `fecha_modificacion` como filtro incremental; imágenes viejas (ej. sin modificar recientemente) se suben solas en ciclos de 5 min. Las ya cacheadas en Storage se omiten.
+
 ## [1.5.12] - 2026-06-30
 
 ### Corregido

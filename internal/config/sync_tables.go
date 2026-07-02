@@ -17,7 +17,7 @@ type SyncTablesConfig struct {
 
 func DefaultSyncTablesConfig() SyncTablesConfig {
 	return SyncTablesConfig{
-		EnabledTables: []string{"clientes", "productos"},
+		EnabledTables: []string{"clientes", "productos", "productos_depositos"},
 		TableMappings: map[string]string{
 			"articulos": "productos",
 		},

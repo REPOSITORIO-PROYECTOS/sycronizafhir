@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,10 +23,12 @@ import (
 var imageSyncCycleMu sync.Mutex
 
 const (
-	imageSyncStateKey       = "image_sync_last_run_utc"
-	imageSyncStatusStateKey = "image_sync_last_status"
-	imageUploadDirection    = "image_upload"
-	imageCacheKeyPrefix     = "img:"
+	imageSyncStateKey         = "image_sync_last_run_utc"
+	imageSyncBacklogOffsetKey = "image_sync_backlog_offset"
+	imageSyncStatusStateKey   = "image_sync_last_status"
+	imageUploadDirection      = "image_upload"
+	imageCacheKeyPrefix       = "img:"
+	defaultImageSyncAutoBatch = 150
 )
 
 type ImageSyncStats struct {
@@ -196,6 +199,27 @@ func (r *ImageResolver) saveCachedURL(ctx context.Context, cacheKey, fingerprint
 	return r.queue.SetStateValue(ctx, cacheKey, string(payload))
 }
 
+// IsLocalImageCached reports whether a local prod_imagen path was already uploaded to Storage.
+func (r *ImageResolver) IsLocalImageCached(ctx context.Context, imagePath string) bool {
+	if r == nil || r.queue == nil {
+		return false
+	}
+	localPath, err := resolveLocalImagePath(r.localBase, imagePath)
+	if err != nil {
+		return false
+	}
+	cacheKey := imageCacheKeyPrefix + strings.ToLower(localPath)
+	raw, exists, err := r.queue.GetStateValue(ctx, cacheKey)
+	if err != nil || !exists {
+		return false
+	}
+	var entry imageCacheEntry
+	if err = json.Unmarshal([]byte(raw), &entry); err != nil {
+		return false
+	}
+	return isRemoteImageURL(entry.URL)
+}
+
 type ImageSyncWorker struct {
 	localPG      *db.LocalPG
 	remotePG     *supabase.PGClient
@@ -204,6 +228,7 @@ type ImageSyncWorker struct {
 	sourceSchema string
 	remoteTable  string
 	pollInterval time.Duration
+	autoBatch    int
 	runtime      *monitor.Runtime
 
 	mu          sync.Mutex
@@ -225,6 +250,10 @@ func NewImageSyncWorker(
 	runtime *monitor.Runtime,
 ) *ImageSyncWorker {
 	syncCfg, _ := config.LoadSyncTablesConfig()
+	autoBatch := cfg.ImageSyncAutoBatch
+	if autoBatch <= 0 {
+		autoBatch = defaultImageSyncAutoBatch
+	}
 	return &ImageSyncWorker{
 		localPG:      localPG,
 		remotePG:     remotePG,
@@ -233,6 +262,7 @@ func NewImageSyncWorker(
 		sourceSchema: cfg.SourceSchema,
 		remoteTable:  syncCfg.ResolveRemoteTable("productos"),
 		pollInterval: cfg.ImageSyncInterval,
+		autoBatch:    autoBatch,
 		runtime:      runtime,
 	}
 }
@@ -332,14 +362,18 @@ func (w *ImageSyncWorker) runCycle(ctx context.Context, force bool) error {
 	}
 
 	since := time.Time{}
+	offset := 0
+	maxToProcess := 0
 	if !force {
-		if loaded, err := w.loadCheckpoint(ctx); err == nil {
-			since = loaded
+		if loaded, err := w.loadBacklogOffset(ctx); err == nil {
+			offset = loaded
 		}
+		maxToProcess = w.autoBatch
 	}
 
 	const batchSize = 100
-	offset := 0
+	attempted := 0
+	wrapped := false
 
 	for {
 		candidates, err := w.localPG.LoadProductImageCandidates(ctx, w.sourceSchema, since, batchSize, offset)
@@ -347,10 +381,29 @@ func (w *ImageSyncWorker) runCycle(ctx context.Context, force bool) error {
 			return err
 		}
 		if len(candidates) == 0 {
+			if !force && !wrapped && offset > 0 {
+				offset = 0
+				wrapped = true
+				continue
+			}
+			if !force {
+				_ = w.persistBacklogOffset(ctx, 0)
+			}
 			break
 		}
 
 		for _, candidate := range candidates {
+			if !force && maxToProcess > 0 && attempted >= maxToProcess {
+				_ = w.persistBacklogOffset(ctx, offset)
+				goto finishCycle
+			}
+
+			if !force && w.resolver != nil && w.resolver.IsLocalImageCached(ctx, candidate.ProdImagen) {
+				stats.Skipped++
+				continue
+			}
+
+			attempted++
 			row := map[string]interface{}{
 				"prod_id":     candidate.ProdID,
 				"prod_imagen": candidate.ProdImagen,
@@ -394,15 +447,23 @@ func (w *ImageSyncWorker) runCycle(ctx context.Context, force bool) error {
 		}
 
 		offset += len(candidates)
+		if !force && maxToProcess > 0 && attempted >= maxToProcess {
+			_ = w.persistBacklogOffset(ctx, offset)
+			goto finishCycle
+		}
 		if len(candidates) < batchSize {
+			if !force {
+				_ = w.persistBacklogOffset(ctx, 0)
+			}
 			break
 		}
 	}
 
+finishCycle:
 	if stats.Failed == 0 {
 		now := time.Now().UTC()
-		if err := w.persistCheckpoint(ctx, now); err != nil {
-			log.Printf("persist image sync checkpoint failed: %v", err)
+		if err := w.persistLastRun(ctx, now); err != nil {
+			log.Printf("persist image sync last run failed: %v", err)
 		}
 	}
 
@@ -466,18 +527,29 @@ func (w *ImageSyncWorker) retryQueuedUploads(ctx context.Context) *imageSyncFail
 	return failures
 }
 
-func (w *ImageSyncWorker) loadCheckpoint(ctx context.Context) (time.Time, error) {
-	rawValue, exists, err := w.queue.GetStateValue(ctx, imageSyncStateKey)
+func (w *ImageSyncWorker) loadBacklogOffset(ctx context.Context) (int, error) {
+	rawValue, exists, err := w.queue.GetStateValue(ctx, imageSyncBacklogOffsetKey)
 	if err != nil {
-		return time.Time{}, err
+		return 0, err
 	}
 	if !exists {
-		return time.Time{}, nil
+		return 0, nil
 	}
-	return time.Parse(time.RFC3339Nano, rawValue)
+	offset, err := strconv.Atoi(strings.TrimSpace(rawValue))
+	if err != nil || offset < 0 {
+		return 0, nil
+	}
+	return offset, nil
 }
 
-func (w *ImageSyncWorker) persistCheckpoint(ctx context.Context, value time.Time) error {
+func (w *ImageSyncWorker) persistBacklogOffset(ctx context.Context, offset int) error {
+	if offset < 0 {
+		offset = 0
+	}
+	return w.queue.SetStateValue(ctx, imageSyncBacklogOffsetKey, strconv.Itoa(offset))
+}
+
+func (w *ImageSyncWorker) persistLastRun(ctx context.Context, value time.Time) error {
 	return w.queue.SetStateValue(ctx, imageSyncStateKey, value.Format(time.RFC3339Nano))
 }
 

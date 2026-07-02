@@ -187,7 +187,7 @@ const mockBootstrapStatus: BootstrapStatus = {
 };
 
 const mockSyncConfig: SyncTablesConfig = {
-  enabled_tables: ["clientes", "productos"],
+  enabled_tables: ["clientes", "productos", "productos_depositos"],
   table_mappings: { articulos: "productos" },
   auto_audit_interval_hours: 6,
   auto_sync_on_audit: true,
