@@ -37,7 +37,11 @@ type Config struct {
 	ExcludeTables       []string
 	BootstrapChunkSize  int
 	AuditInterval       time.Duration
-	ImageSyncEnabled       bool
+	InboundClientesInterval     time.Duration
+	InboundPedidosInterval      time.Duration
+	InboundPedidoPaginaInterval time.Duration
+	InboundPedidosTiendaInterval time.Duration
+	ImageSyncEnabled            bool
 	ImageSyncInterval      time.Duration
 	ImageSyncAutoBatch     int
 	ImageLocalBasePath     string
@@ -78,6 +82,26 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	inboundClientesSeconds, err := readIntWithDefault("INBOUND_CLIENTES_INTERVAL_SECONDS", 120)
+	if err != nil {
+		return Config{}, err
+	}
+
+	inboundPedidoPaginaSeconds, err := readIntWithDefault("INBOUND_PEDIDO_PAGINA_INTERVAL_SECONDS", 120)
+	if err != nil {
+		return Config{}, err
+	}
+
+	inboundPedidosSeconds, err := readIntWithDefault("INBOUND_PEDIDOS_INTERVAL_SECONDS", 60)
+	if err != nil {
+		return Config{}, err
+	}
+
+	inboundPedidosTiendaSeconds, err := readIntWithDefault("INBOUND_PEDIDOS_TIENDA_INTERVAL_SECONDS", 120)
+	if err != nil {
+		return Config{}, err
+	}
+
 	sqlitePath, err := ResolveSQLiteQueuePath(readStringWithDefault("SQLITE_QUEUE_PATH", "./sync_queue.db"))
 	if err != nil {
 		return Config{}, fmt.Errorf("resolve SQLITE_QUEUE_PATH: %w", err)
@@ -108,7 +132,11 @@ func Load() (Config, error) {
 		ExcludeTables:       readCSV("SYNC_EXCLUDE_TABLES"),
 		BootstrapChunkSize:       bootstrapChunkSize,
 		AuditInterval:            time.Duration(auditHours) * time.Hour,
-		ImageSyncEnabled:         readBoolWithDefault("IMAGE_SYNC_ENABLED", true),
+		InboundClientesInterval:     time.Duration(inboundClientesSeconds) * time.Second,
+		InboundPedidosInterval:      time.Duration(inboundPedidosSeconds) * time.Second,
+		InboundPedidoPaginaInterval: time.Duration(inboundPedidoPaginaSeconds) * time.Second,
+		InboundPedidosTiendaInterval: time.Duration(inboundPedidosTiendaSeconds) * time.Second,
+		ImageSyncEnabled:            readBoolWithDefault("IMAGE_SYNC_ENABLED", true),
 		ImageSyncInterval:        time.Duration(imageSyncSeconds) * time.Second,
 		ImageSyncAutoBatch:       imageSyncAutoBatch,
 		ImageLocalBasePath:       readStringWithDefault("IMAGE_LOCAL_BASE_PATH", `C:\Sys_Image`),

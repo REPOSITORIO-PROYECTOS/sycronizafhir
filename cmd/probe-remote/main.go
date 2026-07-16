@@ -25,7 +25,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	fmt.Println("=== sycronizafhir probe ===\n")
+	fmt.Println("=== sycronizafhir probe ===")
 
 	remotePG, err := supabase.NewPGClient(ctx, cfg.SupabaseDBDSN())
 	if err != nil {

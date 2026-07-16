@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -845,4 +846,136 @@ func filterAllowedColumns(columns []string, allowed map[string]bool) []string {
 		}
 	}
 	return filtered
+}
+
+func (c *PGClient) LoadUpdatedRows(ctx context.Context, schemaName, tableName string, since time.Time) ([]map[string]interface{}, error) {
+	if !safeIdentifierRegex.MatchString(schemaName) || !safeIdentifierRegex.MatchString(tableName) {
+		return nil, fmt.Errorf("invalid table identifier %s.%s", schemaName, tableName)
+	}
+
+	isDateColumn, err := c.isFechaModificacionDate(ctx, schemaName, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	whereClause := "fecha_modificacion > $1"
+	if isDateColumn {
+		whereClause = "fecha_modificacion >= $1::date"
+	}
+
+	query := fmt.Sprintf(
+		`SELECT * FROM %s.%s WHERE fecha_modificacion IS NOT NULL AND %s ORDER BY fecha_modificacion ASC`,
+		quoteIdentifier(schemaName),
+		quoteIdentifier(tableName),
+		whereClause,
+	)
+
+	rows, err := c.pool.Query(ctx, query, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanRemoteRows(rows)
+}
+
+func (c *PGClient) isFechaModificacionDate(ctx context.Context, schemaName, tableName string) (bool, error) {
+	const query = `
+		SELECT data_type
+		FROM information_schema.columns
+		WHERE table_schema = $1
+		  AND table_name = $2
+		  AND column_name = 'fecha_modificacion'
+		LIMIT 1`
+
+	var dataType string
+	if err := c.pool.QueryRow(ctx, query, schemaName, tableName).Scan(&dataType); err != nil {
+		return false, err
+	}
+	return dataType == "date", nil
+}
+
+func (c *PGClient) ResolvePedidoPaginaDetailTable(ctx context.Context, schemaName string) (string, error) {
+	candidates := []string{"pedido_pagina_detail", "pedido_pagina_d", "pedido_pagina_detalle"}
+	for _, name := range candidates {
+		ok, err := c.TableExists(ctx, schemaName, name)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return name, nil
+		}
+	}
+	return "", nil
+}
+
+func (c *PGClient) LoadPedidoPaginaHeadsAfterID(
+	ctx context.Context,
+	schemaName string,
+	afterID int64,
+	limit int,
+) ([]map[string]interface{}, error) {
+	if !safeIdentifierRegex.MatchString(schemaName) {
+		return nil, fmt.Errorf("invalid schema name: %s", schemaName)
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	query := fmt.Sprintf(
+		`SELECT * FROM %s.%s WHERE pedido_id > $1 ORDER BY pedido_id ASC LIMIT $2`,
+		quoteIdentifier(schemaName),
+		quoteIdentifier("pedido_pagina"),
+	)
+	rows, err := c.pool.Query(ctx, query, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanRemoteRows(rows)
+}
+
+func (c *PGClient) LoadPedidoPaginaHeadsEstadoNAfterID(
+	ctx context.Context,
+	schemaName string,
+	afterID int64,
+	limit int,
+) ([]map[string]interface{}, error) {
+	if !safeIdentifierRegex.MatchString(schemaName) {
+		return nil, fmt.Errorf("invalid schema name: %s", schemaName)
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	query := fmt.Sprintf(
+		`SELECT * FROM %s.%s WHERE pedido_id > $1 AND UPPER(TRIM(COALESCE(estado, ''))) = 'N' ORDER BY pedido_id ASC LIMIT $2`,
+		quoteIdentifier(schemaName),
+		quoteIdentifier("pedido_pagina"),
+	)
+	rows, err := c.pool.Query(ctx, query, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanRemoteRows(rows)
+}
+
+func (c *PGClient) LoadPedidoPaginaDetails(
+	ctx context.Context,
+	schemaName, detailTable string,
+	pedidoID int64,
+) ([]map[string]interface{}, error) {
+	if !safeIdentifierRegex.MatchString(schemaName) || !safeIdentifierRegex.MatchString(detailTable) {
+		return nil, fmt.Errorf("invalid table identifier")
+	}
+	query := fmt.Sprintf(
+		`SELECT * FROM %s.%s WHERE pedido_id = $1 ORDER BY prod_id ASC`,
+		quoteIdentifier(schemaName),
+		quoteIdentifier(detailTable),
+	)
+	rows, err := c.pool.Query(ctx, query, pedidoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanRemoteRows(rows)
 }

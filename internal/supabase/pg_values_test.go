@@ -3,6 +3,8 @@ package supabase
 import (
 	"reflect"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func TestNormalizeParamValue_integerArray(t *testing.T) {
@@ -93,6 +95,41 @@ func TestNormalizeParamValue_scalarPassthrough(t *testing.T) {
 	}
 	if NormalizeParamValue(nil) != nil {
 		t.Fatal("nil should pass through")
+	}
+}
+
+func TestNormalizeParamValue_pgtypeTime(t *testing.T) {
+	usecs := int64((17*3600 + 35*60 + 21) * 1_000_000)
+	got := NormalizeParamValue(pgtype.Time{Valid: true, Microseconds: usecs})
+	if got != "17:35:21" {
+		t.Fatalf("got %v want 17:35:21", got)
+	}
+}
+
+func TestNormalizeParamValue_decodedTimeMap(t *testing.T) {
+	got := NormalizeParamValue(map[string]interface{}{
+		"Microseconds": float64(16*3600*1_000_000 + 4*60*1_000_000 + 55*1_000_000),
+		"Valid":        true,
+	})
+	if got != "16:04:55" {
+		t.Fatalf("got %v want 16:04:55", got)
+	}
+}
+
+func TestNormalizeParamValue_decodedTimeMapFloatScientific(t *testing.T) {
+	got := NormalizeParamValue(map[string]interface{}{
+		"Microseconds": 2.8791622e+10,
+		"Valid":        true,
+	})
+	if got != "07:59:51" {
+		t.Fatalf("got %v want 07:59:51", got)
+	}
+}
+
+func TestNormalizeParamValue_pgtypeInterval(t *testing.T) {
+	got := NormalizeParamValue(pgtype.Interval{Valid: true, Days: 2, Microseconds: 3_600_000_000})
+	if got != "01:00:00" {
+		t.Fatalf("got %v", got)
 	}
 }
 

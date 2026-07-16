@@ -326,13 +326,21 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 	presence := syncworker.NewPresenceWorker(queueDB, supabasePG, *cfg, rt, resolution.Selected.Kind, localDBSummary)
 	audit := syncworker.NewAuditWorker(localPG, supabasePG, queueDB, imageResolver, cfg.SourceSchema, cfg.ExcludeTables, cfg.AuditInterval, rt)
 	imageSync := syncworker.NewImageSyncWorker(localPG, supabasePG, queueDB, imageResolver, *cfg, rt)
+	clientesInbound := syncworker.NewClientesInboundWorker(localPG, supabasePG, queueDB, *cfg, rt)
+	pedidosInbound := syncworker.NewPedidosInboundWorker(localPG, supabasePG, queueDB, *cfg, rt)
+	pedidoPaginaInbound := syncworker.NewPedidoPaginaInboundWorker(localPG, supabasePG, queueDB, *cfg, rt)
+	pedidosTiendaInbound := syncworker.NewPedidosTiendaInboundWorker(localPG, supabasePG, queueDB, *cfg, rt)
 
 	rt.SetMeta("audit_every", cfg.AuditInterval.String())
 	rt.SetMeta("image_sync_every", cfg.ImageSyncInterval.String())
+	rt.SetMeta("inbound_clientes_every", cfg.InboundClientesInterval.String())
+	rt.SetMeta("inbound_pedidos_every", cfg.InboundPedidosInterval.String())
+	rt.SetMeta("inbound_pedido_pagina_every", cfg.InboundPedidoPaginaInterval.String())
+	rt.SetMeta("inbound_pedidos_tienda_every", cfg.InboundPedidosTiendaInterval.String())
 	rt.SetMeta("storage_bucket_productos", cfg.StorageBucketProductos)
 
 	wg := &sync.WaitGroup{}
-	wg.Add(5)
+	wg.Add(9)
 	go func() {
 		defer wg.Done()
 		outbound.Run(ctx)
@@ -352,6 +360,22 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 	go func() {
 		defer wg.Done()
 		imageSync.Run(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		clientesInbound.Run(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		pedidosInbound.Run(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		pedidoPaginaInbound.Run(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		pedidosTiendaInbound.Run(ctx)
 	}()
 
 	go func() {

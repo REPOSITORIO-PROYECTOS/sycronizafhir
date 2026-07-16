@@ -25,7 +25,7 @@ type OutboundWorker struct {
 	pollInterval  time.Duration
 	sourceSchema  string
 	excludeTables []string
-	lastRun       time.Time
+	tableSince    map[string]time.Time
 	runtime       *monitor.Runtime
 }
 
@@ -51,14 +51,14 @@ func NewOutboundWorker(
 		pollInterval:  cfg.OutboundInterval,
 		sourceSchema:  cfg.SourceSchema,
 		excludeTables: cfg.ExcludeTables,
-		lastRun:       time.Now().Add(-24 * time.Hour),
+		tableSince:    make(map[string]time.Time),
 		runtime:       runtime,
 	}
 }
 
 func (w *OutboundWorker) Run(ctx context.Context) {
-	if err := w.loadCheckpoint(ctx); err != nil {
-		log.Printf("load outbound checkpoint failed, using startup window: %v", err)
+	if err := w.loadCheckpoints(ctx); err != nil {
+		log.Printf("load outbound checkpoints failed, using startup window: %v", err)
 	}
 	w.runtime.SetComponentStatus("outbound", "running", "worker iniciado")
 
@@ -90,6 +90,11 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 		w.runtime.AddLog(fmt.Sprintf("outbound retry queue warning: %v", err))
 	}
 
+	syncCfg, err := config.LoadSyncTablesConfig()
+	if err != nil {
+		return err
+	}
+
 	tables, err := w.localPG.ListSyncTables(ctx, w.sourceSchema, w.excludeTables)
 	if err != nil {
 		return err
@@ -99,7 +104,12 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 	sentRows := 0
 	tablesWithChanges := 0
 	for _, table := range tables {
-		rows, readErr := w.localPG.LoadUpdatedRows(ctx, w.sourceSchema, table.Name, w.lastRun)
+		if !syncCfg.IsEnabled(table.Name) {
+			continue
+		}
+
+		since := w.tableSinceFor(table.Name)
+		rows, readErr := w.localPG.LoadUpdatedRows(ctx, w.sourceSchema, table.Name, since)
 		if readErr != nil {
 			return readErr
 		}
@@ -127,15 +137,13 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 			continue
 		}
 
+		if advanceErr := w.advanceTableCheckpoint(ctx, table.Name, rows); advanceErr != nil {
+			log.Printf("persist outbound checkpoint for %s failed: %v", table.Name, advanceErr)
+		}
+
 		sentRows += len(rows)
 		tablesWithChanges++
 		w.runtime.AddLog(fmt.Sprintf("outbound: subidas %d filas a %s", len(rows), table.Name))
-	}
-
-	now := time.Now().UTC()
-	w.lastRun = now
-	if err = w.persistCheckpoint(ctx, now); err != nil {
-		log.Printf("persist outbound checkpoint failed: %v", err)
 	}
 
 	if sentRows == 0 {
@@ -176,6 +184,10 @@ func (w *OutboundWorker) retryQueuedOutbound(ctx context.Context) error {
 			continue
 		}
 
+		if advanceErr := w.advanceTableCheckpoint(ctx, payload.TableName, rows); advanceErr != nil {
+			log.Printf("persist outbound checkpoint for %s after retry failed: %v", payload.TableName, advanceErr)
+		}
+
 		if err = w.queue.Delete(ctx, job.ID); err != nil {
 			return err
 		}
@@ -188,24 +200,83 @@ func (w *OutboundWorker) retryQueuedOutbound(ctx context.Context) error {
 	return nil
 }
 
-func (w *OutboundWorker) loadCheckpoint(ctx context.Context) error {
-	rawValue, exists, err := w.queue.GetStateValue(ctx, outboundStateKey)
+func (w *OutboundWorker) tableSinceFor(tableName string) time.Time {
+	if since, ok := w.tableSince[tableName]; ok && !since.IsZero() {
+		return since
+	}
+	return time.Now().UTC().Add(-24 * time.Hour)
+}
+
+func (w *OutboundWorker) advanceTableCheckpoint(ctx context.Context, tableName string, rows []map[string]interface{}) error {
+	meta, err := w.localPG.LoadTableModifiedAtMeta(ctx, w.sourceSchema, tableName)
 	if err != nil {
 		return err
 	}
-	if !exists {
+
+	maxAt, ok := db.MaxRowModifiedAt(rows, meta)
+	if !ok {
 		return nil
+	}
+
+	current := w.tableSinceFor(tableName)
+	if !current.IsZero() && !maxAt.After(current) {
+		return nil
+	}
+
+	maxAt = maxAt.UTC()
+	w.tableSince[tableName] = maxAt
+	return w.persistTableCheckpoint(ctx, tableName, maxAt)
+}
+
+func (w *OutboundWorker) loadCheckpoints(ctx context.Context) error {
+	tables, err := w.localPG.ListSyncTables(ctx, w.sourceSchema, w.excludeTables)
+	if err != nil {
+		return err
+	}
+
+	legacyGlobal, hasLegacy, err := w.readCheckpoint(ctx, outboundStateKey)
+	if err != nil {
+		return err
+	}
+
+	for _, table := range tables {
+		tableKey := outboundTableStateKey(table.Name)
+		since, exists, readErr := w.readCheckpoint(ctx, tableKey)
+		if readErr != nil {
+			return readErr
+		}
+		switch {
+		case exists:
+			w.tableSince[table.Name] = since
+		case hasLegacy:
+			w.tableSince[table.Name] = legacyGlobal
+		default:
+			w.tableSince[table.Name] = time.Now().UTC().Add(-24 * time.Hour)
+		}
+	}
+	return nil
+}
+
+func (w *OutboundWorker) readCheckpoint(ctx context.Context, key string) (time.Time, bool, error) {
+	rawValue, exists, err := w.queue.GetStateValue(ctx, key)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	if !exists || strings.TrimSpace(rawValue) == "" {
+		return time.Time{}, false, nil
 	}
 
 	parsed, err := time.Parse(time.RFC3339Nano, rawValue)
 	if err != nil {
-		return fmt.Errorf("parse checkpoint: %w", err)
+		return time.Time{}, false, fmt.Errorf("parse checkpoint %s: %w", key, err)
 	}
-
-	w.lastRun = parsed
-	return nil
+	return parsed.UTC(), true, nil
 }
 
-func (w *OutboundWorker) persistCheckpoint(ctx context.Context, value time.Time) error {
-	return w.queue.SetStateValue(ctx, outboundStateKey, value.Format(time.RFC3339Nano))
+func (w *OutboundWorker) persistTableCheckpoint(ctx context.Context, tableName string, value time.Time) error {
+	return w.queue.SetStateValue(ctx, outboundTableStateKey(tableName), value.UTC().Format(time.RFC3339Nano))
+}
+
+func outboundTableStateKey(tableName string) string {
+	return outboundStateKey + "_" + tableName
 }

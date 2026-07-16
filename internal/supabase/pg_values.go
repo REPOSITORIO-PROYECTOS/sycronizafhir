@@ -6,6 +6,9 @@ import (
 	"math"
 	"reflect"
 	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // NormalizeParamValue convierte valores dinámicos (p. ej. []interface{} de rows.Values
@@ -28,6 +31,14 @@ func NormalizeParamValue(value interface{}) interface{} {
 		return normalized
 	case []byte:
 		return v
+	}
+
+	if encoded, ok := normalizePGTypeValue(value); ok {
+		return encoded
+	}
+
+	if mapped, ok := normalizeDecodedTimeMap(value); ok {
+		return mapped
 	}
 
 	rv := reflect.ValueOf(value)
@@ -80,6 +91,91 @@ func NormalizeRowMap(row map[string]interface{}) map[string]interface{} {
 		row[key] = NormalizeParamValue(value)
 	}
 	return row
+}
+
+func normalizePGTypeValue(value interface{}) (interface{}, bool) {
+	switch v := value.(type) {
+	case pgtype.Time:
+		if !v.Valid {
+			return nil, true
+		}
+		return formatClockFromMicroseconds(v.Microseconds), true
+	case pgtype.Interval:
+		if !v.Valid {
+			return nil, true
+		}
+		return formatInterval(v), true
+	case pgtype.Date:
+		if !v.Valid {
+			return nil, true
+		}
+		return v.Time.Format("2006-01-02"), true
+	case pgtype.Timestamp:
+		if !v.Valid {
+			return nil, true
+		}
+		return v.Time.UTC().Format(time.RFC3339Nano), true
+	case pgtype.Timestamptz:
+		if !v.Valid {
+			return nil, true
+		}
+		return v.Time.UTC().Format(time.RFC3339Nano), true
+	default:
+		return nil, false
+	}
+}
+
+func normalizeDecodedTimeMap(value interface{}) (interface{}, bool) {
+	asMap, ok := value.(map[string]interface{})
+	if !ok {
+		return nil, false
+	}
+	valid := true
+	if rawValid, hasValid := asMap["Valid"]; hasValid {
+		switch v := rawValid.(type) {
+		case bool:
+			valid = v
+		case string:
+			valid = strings.EqualFold(strings.TrimSpace(v), "true")
+		default:
+			valid = fmt.Sprint(v) == "true"
+		}
+	}
+	if !valid {
+		return nil, true
+	}
+	if micros, hasMicros := asMap["Microseconds"]; hasMicros {
+		usecs, ok := toInt64(micros)
+		if !ok {
+			return nil, false
+		}
+		return formatClockFromMicroseconds(usecs), true
+	}
+	if micros, hasMicros := asMap["microseconds"]; hasMicros {
+		usecs, ok := toInt64(micros)
+		if !ok {
+			return nil, false
+		}
+		return formatClockFromMicroseconds(usecs), true
+	}
+	return nil, false
+}
+
+func formatClockFromMicroseconds(usecs int64) string {
+	if usecs < 0 {
+		usecs = 0
+	}
+	hours := usecs / 3_600_000_000
+	usecs %= 3_600_000_000
+	minutes := usecs / 60_000_000
+	usecs %= 60_000_000
+	seconds := usecs / 1_000_000
+	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+}
+
+func formatInterval(value pgtype.Interval) string {
+	// Columnas TIME en ERP suelen ser varchar(12): solo reloj HH:MM:SS.
+	return formatClockFromMicroseconds(value.Microseconds)
 }
 
 func normalizeParamValue(value interface{}) interface{} {

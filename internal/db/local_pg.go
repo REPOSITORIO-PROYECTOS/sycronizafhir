@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -191,23 +192,18 @@ func (db *LocalPG) LoadUpdatedRows(ctx context.Context, schemaName, tableName st
 		return nil, fmt.Errorf("invalid table name: %s", tableName)
 	}
 
-	isDateColumn, err := db.isFechaModificacionDate(ctx, schemaName, tableName)
+	meta, err := db.LoadTableModifiedAtMeta(ctx, schemaName, tableName)
 	if err != nil {
 		return nil, err
 	}
-
-	whereClause := "fecha_modificacion > $1"
-	if isDateColumn {
-		// Legacy tables often persist only DATE precision. Using >= date avoids
-		// losing same-day changes after checkpoint moves to current timestamp.
-		whereClause = "fecha_modificacion >= $1::date"
-	}
+	_, orderBy := ModifiedAtFilterExpr(meta)
 
 	query := fmt.Sprintf(
-		`SELECT * FROM %s.%s WHERE fecha_modificacion IS NOT NULL AND %s ORDER BY fecha_modificacion ASC`,
+		`SELECT * FROM %s.%s WHERE fecha_modificacion IS NOT NULL AND %s ORDER BY %s`,
 		schemaName,
 		tableName,
-		whereClause,
+		ModifiedAtWhereClause(meta),
+		orderBy,
 	)
 
 	rows, err := db.pool.Query(ctx, query, since)
@@ -244,7 +240,7 @@ func (db *LocalPG) CountProductImageCandidates(
 		return 0, fmt.Errorf("invalid schema name: %s", schemaName)
 	}
 
-	isDateColumn, err := db.isFechaModificacionDate(ctx, schemaName, "productos")
+	meta, err := db.LoadTableModifiedAtMeta(ctx, schemaName, "productos")
 	if err != nil {
 		return 0, err
 	}
@@ -260,11 +256,7 @@ func (db *LocalPG) CountProductImageCandidates(
 
 	args := make([]interface{}, 0, 1)
 	if !since.IsZero() {
-		if isDateColumn {
-			query += " AND fecha_modificacion >= $1::date"
-		} else {
-			query += " AND fecha_modificacion > $1"
-		}
+		query += " AND " + ModifiedAtWhereClause(meta)
 		args = append(args, since)
 	}
 
@@ -288,10 +280,11 @@ func (db *LocalPG) LoadProductImageCandidates(
 		return nil, errors.New("invalid pagination values")
 	}
 
-	isDateColumn, err := db.isFechaModificacionDate(ctx, schemaName, "productos")
+	meta, err := db.LoadTableModifiedAtMeta(ctx, schemaName, "productos")
 	if err != nil {
 		return nil, err
 	}
+	_, orderBy := ModifiedAtFilterExpr(meta)
 
 	query := fmt.Sprintf(`
 		SELECT prod_id, prod_imagen, fecha_modificacion
@@ -304,16 +297,12 @@ func (db *LocalPG) LoadProductImageCandidates(
 
 	args := make([]interface{}, 0, 3)
 	if !since.IsZero() {
-		if isDateColumn {
-			query += " AND fecha_modificacion >= $1::date"
-		} else {
-			query += " AND fecha_modificacion > $1"
-		}
+		query += " AND " + ModifiedAtWhereClause(meta)
 		args = append(args, since)
 	}
 
 	argIndex := len(args) + 1
-	query += fmt.Sprintf(" ORDER BY fecha_modificacion ASC LIMIT $%d OFFSET $%d", argIndex, argIndex+1)
+	query += fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", orderBy, argIndex, argIndex+1)
 	args = append(args, limit, offset)
 
 	rows, err := db.pool.Query(ctx, query, args...)
@@ -544,6 +533,73 @@ func scanRowsToMaps(rows pgx.Rows) ([]map[string]interface{}, error) {
 	return result, rows.Err()
 }
 
+func (db *LocalPG) PatchRowColumns(
+	ctx context.Context,
+	schemaName, tableName string,
+	pkColumns []string,
+	pkRow map[string]interface{},
+	patch map[string]interface{},
+) (bool, error) {
+	if len(patch) == 0 {
+		return false, nil
+	}
+	if !safeIdentifierPattern.MatchString(schemaName) || !safeIdentifierPattern.MatchString(tableName) {
+		return false, fmt.Errorf("invalid table identifier %s.%s", schemaName, tableName)
+	}
+	for _, column := range pkColumns {
+		if !safeIdentifierPattern.MatchString(column) {
+			return false, fmt.Errorf("invalid pk column: %s", column)
+		}
+	}
+
+	isDateColumn, err := db.isFechaModificacionDate(ctx, schemaName, tableName)
+	if err == nil {
+		if isDateColumn {
+			patch["fecha_modificacion"] = time.Now().UTC().Truncate(24 * time.Hour)
+		} else {
+			patch["fecha_modificacion"] = time.Now().UTC()
+		}
+	}
+
+	columns := make([]string, 0, len(patch))
+	for column := range patch {
+		columns = append(columns, column)
+	}
+	sort.Strings(columns)
+
+	setParts := make([]string, 0, len(columns))
+	values := make([]interface{}, 0, len(columns)+len(pkColumns))
+	index := 1
+	for _, column := range columns {
+		if !safeIdentifierPattern.MatchString(column) {
+			return false, fmt.Errorf("invalid patch column: %s", column)
+		}
+		setParts = append(setParts, fmt.Sprintf("%s = $%d", column, index))
+		values = append(values, patch[column])
+		index++
+	}
+
+	whereParts := make([]string, 0, len(pkColumns))
+	for _, column := range pkColumns {
+		whereParts = append(whereParts, fmt.Sprintf("%s = $%d", column, index))
+		values = append(values, pkRow[column])
+		index++
+	}
+
+	query := fmt.Sprintf(
+		`UPDATE %s.%s SET %s WHERE %s`,
+		schemaName,
+		tableName,
+		strings.Join(setParts, ", "),
+		strings.Join(whereParts, " AND "),
+	)
+	tag, err := db.pool.Exec(ctx, query, values...)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 func (db *LocalPG) readPrimaryKeys(ctx context.Context, schemaName, tableName string) ([]string, error) {
 	const query = `
 		SELECT kcu.column_name
@@ -572,4 +628,285 @@ func (db *LocalPG) readPrimaryKeys(ctx context.Context, schemaName, tableName st
 	}
 
 	return primaryKeys, rows.Err()
+}
+
+func (db *LocalPG) TableExists(ctx context.Context, schemaName, tableName string) (bool, error) {
+	if !safeIdentifierPattern.MatchString(schemaName) || !safeIdentifierPattern.MatchString(tableName) {
+		return false, fmt.Errorf("invalid table identifier %s.%s", schemaName, tableName)
+	}
+	var exists bool
+	err := db.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables
+			WHERE table_schema = $1 AND table_name = $2 AND table_type = 'BASE TABLE'
+		)`, schemaName, tableName).Scan(&exists)
+	return exists, err
+}
+
+func (db *LocalPG) ResolvePedidoPaginaDetailTable(ctx context.Context, schemaName string) (string, error) {
+	candidates := []string{"pedido_pagina_detail", "pedido_pagina_d", "pedido_pagina_detalle"}
+	for _, name := range candidates {
+		ok, err := db.TableExists(ctx, schemaName, name)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return name, nil
+		}
+	}
+	return "", nil
+}
+
+func (db *LocalPG) UpsertPedidoPaginaHead(ctx context.Context, schemaName string, row map[string]interface{}) error {
+	if !safeIdentifierPattern.MatchString(schemaName) {
+		return fmt.Errorf("invalid schema name: %s", schemaName)
+	}
+	pedidoID := row["pedido_id"]
+	if pedidoID == nil {
+		return fmt.Errorf("pedido_pagina head missing pedido_id")
+	}
+
+	var one int
+	err := db.pool.QueryRow(ctx,
+		fmt.Sprintf(`SELECT 1 FROM %s.pedido_pagina WHERE pedido_id = $1 LIMIT 1`, schemaName),
+		pedidoID,
+	).Scan(&one)
+	if err == nil {
+		return nil
+	}
+	if err != pgx.ErrNoRows {
+		return err
+	}
+
+	columns := make([]string, 0, len(row))
+	values := make([]interface{}, 0, len(row))
+	placeholders := make([]string, 0, len(row))
+	index := 1
+	for key, value := range row {
+		if !safeIdentifierPattern.MatchString(key) {
+			continue
+		}
+		columns = append(columns, key)
+		values = append(values, value)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", index))
+		index++
+	}
+	sort.Strings(columns)
+	// rebuild in sorted order
+	values = values[:0]
+	placeholders = placeholders[:0]
+	index = 1
+	for _, key := range columns {
+		placeholders = append(placeholders, fmt.Sprintf("$%d", index))
+		values = append(values, row[key])
+		index++
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO %s.pedido_pagina (%s) VALUES (%s)`,
+		schemaName,
+		strings.Join(columns, ", "),
+		strings.Join(placeholders, ", "),
+	)
+	_, err = db.pool.Exec(ctx, query, values...)
+	return err
+}
+
+func (db *LocalPG) ReplacePedidoPaginaDetails(
+	ctx context.Context,
+	schemaName, detailTable string,
+	pedidoID int64,
+	lines []map[string]interface{},
+) error {
+	if !safeIdentifierPattern.MatchString(schemaName) || !safeIdentifierPattern.MatchString(detailTable) {
+		return fmt.Errorf("invalid table identifier")
+	}
+	if _, err := db.pool.Exec(ctx,
+		fmt.Sprintf(`DELETE FROM %s.%s WHERE pedido_id = $1`, schemaName, detailTable),
+		pedidoID,
+	); err != nil {
+		return err
+	}
+	for _, line := range lines {
+		line["pedido_id"] = pedidoID
+		columns := make([]string, 0, len(line))
+		for key := range line {
+			if safeIdentifierPattern.MatchString(key) {
+				columns = append(columns, key)
+			}
+		}
+		sort.Strings(columns)
+		values := make([]interface{}, 0, len(columns))
+		placeholders := make([]string, 0, len(columns))
+		for i, key := range columns {
+			values = append(values, line[key])
+			placeholders = append(placeholders, fmt.Sprintf("$%d", i+1))
+		}
+		query := fmt.Sprintf(
+			`INSERT INTO %s.%s (%s) VALUES (%s)`,
+			schemaName,
+			detailTable,
+			strings.Join(columns, ", "),
+			strings.Join(placeholders, ", "),
+		)
+		if _, err := db.pool.Exec(ctx, query, values...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (db *LocalPG) ResolvePedidosDetalleTable(ctx context.Context, schemaName string) (string, error) {
+	candidates := []string{"pedidos_d", "pedido_detalle"}
+	for _, name := range candidates {
+		ok, err := db.TableExists(ctx, schemaName, name)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return name, nil
+		}
+	}
+	return "", nil
+}
+
+func (db *LocalPG) PedidoCabeceraExists(ctx context.Context, schemaName, pedID string) (bool, error) {
+	if !safeIdentifierPattern.MatchString(schemaName) {
+		return false, fmt.Errorf("invalid schema name: %s", schemaName)
+	}
+	pedID = strings.TrimSpace(pedID)
+	if pedID == "" {
+		return false, fmt.Errorf("ped_id vacío")
+	}
+	var one int
+	err := db.pool.QueryRow(ctx,
+		fmt.Sprintf(`SELECT 1 FROM %s.pedidos WHERE TRIM(ped_id) = $1 LIMIT 1`, schemaName),
+		pedID,
+	).Scan(&one)
+	if err == pgx.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (db *LocalPG) LookupClienteIDByCuit(ctx context.Context, schemaName, cuitDigits string) (int16, bool, error) {
+	if !safeIdentifierPattern.MatchString(schemaName) {
+		return 0, false, fmt.Errorf("invalid schema name: %s", schemaName)
+	}
+	cuitDigits = strings.TrimSpace(cuitDigits)
+	if cuitDigits == "" {
+		return 0, false, nil
+	}
+
+	query := fmt.Sprintf(`
+		SELECT clien_id
+		FROM %s.clientes
+		WHERE regexp_replace(trim(clien_cuit::text), '[^0-9]', '', 'g') = $1
+		   OR trim(clien_cuit::text) = $1
+		ORDER BY clien_id ASC
+		LIMIT 1
+	`, schemaName)
+
+	var clienID int16
+	err := db.pool.QueryRow(ctx, query, cuitDigits).Scan(&clienID)
+	if err == pgx.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return clienID, true, nil
+}
+
+func (db *LocalPG) UpsertPedidoCabeceraTienda(ctx context.Context, schemaName string, row map[string]interface{}) error {
+	if !safeIdentifierPattern.MatchString(schemaName) {
+		return fmt.Errorf("invalid schema name: %s", schemaName)
+	}
+	pedID, ok := row["ped_id"].(string)
+	if !ok || strings.TrimSpace(pedID) == "" {
+		return fmt.Errorf("pedidos cabecera missing ped_id")
+	}
+
+	query := fmt.Sprintf(`
+		INSERT INTO %s.pedidos (
+			ped_id, ped_fecha, ped_nombre, ped_gravado, ped_no_gravado, ped_exento,
+			ped_descuento, ped_iva, ped_total, usu_id, clien_id, local_id, estado, ped_obs,
+			fecha_modificacion, hora_modificacion
+		) VALUES (
+			$1, $2, $3, $4, $5, $6,
+			$7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+		)
+	`, schemaName)
+
+	_, err := db.pool.Exec(ctx, query,
+		row["ped_id"],
+		row["ped_fecha"],
+		row["ped_nombre"],
+		row["ped_gravado"],
+		row["ped_no_gravado"],
+		row["ped_exento"],
+		row["ped_descuento"],
+		row["ped_iva"],
+		row["ped_total"],
+		row["usu_id"],
+		row["clien_id"],
+		row["local_id"],
+		row["estado"],
+		row["ped_obs"],
+		row["fecha_modificacion"],
+		row["hora_modificacion"],
+	)
+	return err
+}
+
+func (db *LocalPG) ReplacePedidosDetalleTienda(
+	ctx context.Context,
+	schemaName, detailTable, pedID string,
+	lines []map[string]interface{},
+) error {
+	if !safeIdentifierPattern.MatchString(schemaName) || !safeIdentifierPattern.MatchString(detailTable) {
+		return fmt.Errorf("invalid table identifier")
+	}
+	pedID = strings.TrimSpace(pedID)
+	if pedID == "" {
+		return fmt.Errorf("ped_id vacío")
+	}
+
+	if _, err := db.pool.Exec(ctx,
+		fmt.Sprintf(`DELETE FROM %s.%s WHERE TRIM(ped_id) = $1`, schemaName, detailTable),
+		pedID,
+	); err != nil {
+		return err
+	}
+
+	for _, line := range lines {
+		line["ped_id"] = pedID
+		columns := make([]string, 0, len(line))
+		for key := range line {
+			if safeIdentifierPattern.MatchString(key) {
+				columns = append(columns, key)
+			}
+		}
+		sort.Strings(columns)
+		values := make([]interface{}, 0, len(columns))
+		placeholders := make([]string, 0, len(columns))
+		for i, key := range columns {
+			values = append(values, line[key])
+			placeholders = append(placeholders, fmt.Sprintf("$%d", i+1))
+		}
+		query := fmt.Sprintf(
+			`INSERT INTO %s.%s (%s) VALUES (%s)`,
+			schemaName,
+			detailTable,
+			strings.Join(columns, ", "),
+			strings.Join(placeholders, ", "),
+		)
+		if _, err := db.pool.Exec(ctx, query, values...); err != nil {
+			return err
+		}
+	}
+	return nil
 }

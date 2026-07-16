@@ -3,6 +3,48 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.5.18] - 2026-07-08
+
+### Agregado
+
+- **Inbound pedidos tienda**: `pedido_pagina` (estado N) → `pedidos` + `pedidos_d` en Mica (`PedidosTiendaInboundWorker`).
+- CLIs de sonda: `probe-pedidos-tienda`, `probe-product`.
+- SQL `006_pedido_pagina_*.sql` para schema/cleanup/e2e en Supabase.
+
+## [1.5.17] - 2026-07-08
+
+### Agregado
+
+- **Inbound clientes**: baja contacto completado en tienda web (Supabase → Mica).
+- **Inbound pedidos**: replica estados K/V/E (y bultos) desde Picking/Supabase → Mica.
+- **Inbound pedido_pagina**: replica cabecera + detalle Supabase → Mica.
+- Meta `fecha_modificacion`/`hora_modificacion` por tabla (`modified_at.go`) para cursor compuesto.
+- Intervalos configurables: `INBOUND_*_INTERVAL_SECONDS`.
+
+## [1.5.16] - 2026-07-08
+
+### Corregido
+
+- **cuenta_corriente**: maps JSON con `Valid`+`Microseconds` (float64) y `pgtype.Interval` → `HH:MM:SS` (compatible varchar(12)).
+
+## [1.5.15] - 2026-07-08
+
+### Corregido
+
+- **Upsert `cuenta_corriente`**: normalización de `pgtype.Time`, `pgtype.Interval` y maps JSON con `Microseconds` a strings codificables por pgx (elimina `cannot find encode plan`).
+
+## [1.5.14] - 2026-07-08
+
+### Corregido
+
+- **Outbound incremental**: cursor por `fecha_modificacion` + `hora_modificacion` (ya no se pierden cambios del mismo día ni filas del día anterior si falló el upsert).
+- **Checkpoint outbound**: un cursor **por tabla**, avanza solo con el máximo `(fecha+hora)` de filas **upsert OK** (no más `time.Now()` global).
+- **Outbound automático**: respeta `enabled_tables` de `sync-tables.json` (p. ej. excluir `cuenta_corriente` hasta arreglar encoding).
+
+### Agregado
+
+- Tests unitarios para cursor compuesto y checkpoints por tabla.
+
 ## [1.5.13] - 2026-07-02
 
 ### Agregado
