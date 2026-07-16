@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -33,23 +34,27 @@ type App struct {
 	auditMu         sync.Mutex
 	auditActive     bool
 	lastAudit       syncworker.DataAuditReport
+	// quitForUpdate marca que la ventana se cierra para aplicar una actualización.
+	// En ese caso NO se debe relanzar el proceso en segundo plano (el updater ya
+	// reabre el monitor y necesita el .exe liberado).
+	quitForUpdate atomic.Bool
 }
 
 type ConfigSummary struct {
-	AppName       string   `json:"app_name"`
-	LocalDB       string   `json:"local_db"`
-	RemoteDB      string   `json:"remote_db"`
-	SourceSchema  string   `json:"source_schema"`
-	ExcludeTables []string `json:"exclude_tables"`
-	OutboundEvery          string `json:"outbound_every"`
-	AuditEvery             string `json:"audit_every"`
-	ImageSyncEvery         string `json:"image_sync_every"`
-	StorageBucketProductos string `json:"storage_bucket_productos"`
-	ImageSyncEnabled       bool   `json:"image_sync_enabled"`
-	RealtimeURL            string `json:"realtime_url"`
-	Channel       string   `json:"channel"`
-	Schema        string   `json:"schema"`
-	Table         string   `json:"table"`
+	AppName                string   `json:"app_name"`
+	LocalDB                string   `json:"local_db"`
+	RemoteDB               string   `json:"remote_db"`
+	SourceSchema           string   `json:"source_schema"`
+	ExcludeTables          []string `json:"exclude_tables"`
+	OutboundEvery          string   `json:"outbound_every"`
+	AuditEvery             string   `json:"audit_every"`
+	ImageSyncEvery         string   `json:"image_sync_every"`
+	StorageBucketProductos string   `json:"storage_bucket_productos"`
+	ImageSyncEnabled       bool     `json:"image_sync_enabled"`
+	RealtimeURL            string   `json:"realtime_url"`
+	Channel                string   `json:"channel"`
+	Schema                 string   `json:"schema"`
+	Table                  string   `json:"table"`
 }
 
 type SyncTablesConfigDTO struct {
@@ -57,19 +62,33 @@ type SyncTablesConfigDTO struct {
 	TableMappings          map[string]string `json:"table_mappings"`
 	AutoAuditIntervalHours int               `json:"auto_audit_interval_hours"`
 	AutoSyncOnAudit        bool              `json:"auto_sync_on_audit"`
+	// AllowCoreDisable habilita persistir un set que apaga tablas core.
+	// La UI solo lo envía tras una doble confirmación explícita del operador.
+	AllowCoreDisable bool `json:"allow_core_disable"`
+}
+
+// SaveSyncTablesConfigResult refleja el resultado del guardado para que la UI
+// pueda avisar (y no persistir en silencio) cuando el set es inválido o apaga
+// tablas core. Config trae el estado efectivo (persistido o el previo si falla).
+type SaveSyncTablesConfigResult struct {
+	Success      bool                `json:"success"`
+	Message      string              `json:"message"`
+	NeedsConfirm bool                `json:"needs_confirm"`
+	RemovedCore  []string            `json:"removed_core"`
+	Config       SyncTablesConfigDTO `json:"config"`
 }
 
 type AvailableSyncTable struct {
-	Name        string `json:"name"`
-	RemoteName  string `json:"remote_name"`
+	Name        string   `json:"name"`
+	RemoteName  string   `json:"remote_name"`
 	PrimaryKeys []string `json:"primary_keys"`
-	Enabled     bool   `json:"enabled"`
+	Enabled     bool     `json:"enabled"`
 }
 
 type DataAuditActionResult struct {
-	Success bool                        `json:"success"`
-	Message string                      `json:"message"`
-	Report  syncworker.DataAuditReport  `json:"report"`
+	Success bool                       `json:"success"`
+	Message string                     `json:"message"`
+	Report  syncworker.DataAuditReport `json:"report"`
 }
 
 type SyncSelectedResult struct {
@@ -79,8 +98,8 @@ type SyncSelectedResult struct {
 }
 
 type ImageSyncResult struct {
-	Success bool                     `json:"success"`
-	Message string                   `json:"message"`
+	Success bool                      `json:"success"`
+	Message string                    `json:"message"`
 	Stats   syncworker.ImageSyncStats `json:"stats"`
 }
 
@@ -153,17 +172,60 @@ func (a *App) GetSyncTablesConfig() SyncTablesConfigDTO {
 	return toSyncTablesDTO(cfg)
 }
 
-func (a *App) SaveSyncTablesConfig(input SyncTablesConfigDTO) SyncTablesConfigDTO {
+func (a *App) SaveSyncTablesConfig(input SyncTablesConfigDTO) SaveSyncTablesConfigResult {
+	previous, _ := config.LoadSyncTablesConfig()
+
+	if !config.HasEnabledTables(input.EnabledTables) {
+		a.runtime.AddLog("config sync-tables rechazada: set vacío (se conserva el anterior)")
+		return SaveSyncTablesConfigResult{
+			Success: false,
+			Message: "No se puede guardar sin ninguna tabla habilitada. Se mantiene la configuración anterior.",
+			Config:  toSyncTablesDTO(previous),
+		}
+	}
+
+	removedCore := config.RemovedCoreTables(input.EnabledTables)
+	if len(removedCore) > 0 && !input.AllowCoreDisable {
+		a.runtime.AddLog("config sync-tables requiere confirmación: apagaría tablas core " + strings.Join(removedCore, ", "))
+		return SaveSyncTablesConfigResult{
+			Success:      false,
+			NeedsConfirm: true,
+			RemovedCore:  removedCore,
+			Message:      "Esta configuración apaga la sincronización en segundo plano de: " + strings.Join(removedCore, ", ") + ". Confirmá para continuar.",
+			Config:       toSyncTablesDTO(previous),
+		}
+	}
+
 	cfg := config.SyncTablesConfig{
 		EnabledTables:          input.EnabledTables,
 		TableMappings:          input.TableMappings,
 		AutoAuditIntervalHours: input.AutoAuditIntervalHours,
 		AutoSyncOnAudit:        input.AutoSyncOnAudit,
+		// La UI no edita los campos propiedad de la nube: se conservan tal cual.
+		CloudOwnedFields: previous.CloudOwnedFields,
 	}
 	if saveErr := config.SaveSyncTablesConfig(cfg); saveErr != nil {
 		a.runtime.AddLog("sync tables config save failed: " + saveErr.Error())
+		return SaveSyncTablesConfigResult{
+			Success: false,
+			Message: "No se pudo guardar la configuración: " + saveErr.Error(),
+			Config:  toSyncTablesDTO(previous),
+		}
 	}
-	return toSyncTablesDTO(cfg)
+
+	saved, _ := config.LoadSyncTablesConfig()
+	a.runtime.AddLog(fmt.Sprintf(
+		"config sync-tables actualizada (GUI): enabled %v -> %v",
+		previous.EnabledTables, saved.EnabledTables,
+	))
+	if len(removedCore) > 0 {
+		a.runtime.AddLog("config sync-tables: tablas core deshabilitadas con confirmación: " + strings.Join(removedCore, ", "))
+	}
+	return SaveSyncTablesConfigResult{
+		Success: true,
+		Message: "Configuración guardada.",
+		Config:  toSyncTablesDTO(saved),
+	}
 }
 
 func (a *App) ListAvailableSyncTables() ([]AvailableSyncTable, error) {
@@ -492,9 +554,9 @@ func (a *App) GetConfigSummary() ConfigSummary {
 		StorageBucketProductos: a.cfg.StorageBucketProductos,
 		ImageSyncEnabled:       a.cfg.ImageSyncEnabled,
 		RealtimeURL:            redactSensitive(a.cfg.SupabaseRealtimeURL),
-		Channel:       a.cfg.RealtimeChannel,
-		Schema:        a.cfg.RealtimeSchema,
-		Table:         a.cfg.RealtimeTable,
+		Channel:                a.cfg.RealtimeChannel,
+		Schema:                 a.cfg.RealtimeSchema,
+		Table:                  a.cfg.RealtimeTable,
 	}
 }
 

@@ -2,7 +2,7 @@
 
 Documento de consulta rápida: qué está listo en el código, qué falta en la máquina de producción (ej. Mica) y dónde hacer cada paso.
 
-**Versión repo:** 1.5.13 · **Última revisión:** 2026-07-02
+**Versión repo:** 1.6.0 · **Última revisión:** 2026-07-16
 
 ---
 
@@ -142,6 +142,28 @@ Repetir por tabla. Ajustar a `CURRENT_TIMESTAMP` si la columna es `timestamp`.
 - Excluir `fecha_modificacion` del hash de auditoría.
 - Normalizar `time` (`hora_modif`) en hash local vs remoto.
 - Limpiar cola SQLite de 442k reintentos (solo tras confirmar fix RLS).
+
+---
+
+## 8b. Tiempos de imágenes y de auditoría (aclaración operativa)
+
+### Imágenes — cada cuánto suben
+
+| Modo | Cada cuánto | Cuánto procesa | Variable |
+|------|-------------|----------------|----------|
+| Automático (background) | Cada **5 min** | **150** productos por ciclo (recorre todo el backlog por offset, sin depender de `fecha_modificacion`) | `IMAGE_SYNC_INTERVAL_SECONDS` (default 300), `IMAGE_SYNC_AUTO_BATCH` (default 150) |
+| Manual («Subir imágenes ahora») | Al tocar el botón | **Todo** el backlog de una vez | — |
+
+- Una imagen **nueva o cambiada** se ve en la tienda en **≤ 5 min** (o al instante con «Subir imágenes ahora»).
+- Las ya cacheadas en Storage se **omiten** (no se re-suben).
+- Si hay un **backlog grande** y se quiere vaciar más rápido en automático, subir `IMAGE_SYNC_AUTO_BATCH` (p. ej. 500) en el `.env` y reiniciar. Ojo: lotes muy grandes alargan cada ciclo.
+- "Imágenes que no aparecen" suele ser **dato** (archivo faltante en disco o nombre ≠ `prod_id`), no demora: revisar el panel (estados `sin archivo` / `ruta inválida`).
+
+### Auditoría — cuál intervalo manda
+
+- El **worker programado** usa **`SYNC_AUDIT_INTERVAL_HOURS`** del `.env` (default **6 h**). **Ese es el valor efectivo.**
+- El campo `auto_audit_interval_hours` de `%APPDATA%\sycronizafhir\sync-tables.json` **solo se muestra/edita en la GUI**; **NO** cambia el intervalo real del worker. Para cambiar el intervalo de verdad, editar `SYNC_AUDIT_INTERVAL_HOURS` en el `.env` y reiniciar.
+- `auto_sync_on_audit` (JSON) sí aplica: define si la auditoría programada sube diffs automáticamente.
 
 ---
 

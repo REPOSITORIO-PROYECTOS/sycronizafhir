@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -20,11 +21,11 @@ const (
 )
 
 var (
-	kernel32             = syscall.NewLazyDLL("kernel32.dll")
-	procCreateMutexW     = kernel32.NewProc("CreateMutexW")
-	procGetLastError     = kernel32.NewProc("GetLastError")
-	procReleaseMutex     = kernel32.NewProc("ReleaseMutex")
-	procCloseHandle      = kernel32.NewProc("CloseHandle")
+	kernel32         = syscall.NewLazyDLL("kernel32.dll")
+	procCreateMutexW = kernel32.NewProc("CreateMutexW")
+	procGetLastError = kernel32.NewProc("GetLastError")
+	procReleaseMutex = kernel32.NewProc("ReleaseMutex")
+	procCloseHandle  = kernel32.NewProc("CloseHandle")
 )
 
 type instanceLock struct {
@@ -82,6 +83,33 @@ func ensureBackgroundReleased() bool {
 		time.Sleep(time.Duration(pingExitTimeoutMS/pingExitWaitIntervals) * time.Millisecond)
 	}
 	return false
+}
+
+// scheduleBackgroundRelaunch programa el relanzamiento del proceso en modo
+// --background una vez que la instancia actual (monitor) termine. Espera a que
+// el PID actual salga antes de arrancar para no competir por el mutex global ni
+// por la cola SQLite (evita corrupción y arranques que se auto-descartan).
+func scheduleBackgroundRelaunch() {
+	exePath, err := os.Executable()
+	if err != nil || strings.TrimSpace(exePath) == "" {
+		return
+	}
+	pid := syscall.Getpid()
+	psCommand := fmt.Sprintf(
+		"try { Wait-Process -Id %d -Timeout 60 -ErrorAction SilentlyContinue } catch {}; "+
+			"Start-Process -FilePath '%s' -ArgumentList '--background' -WindowStyle Hidden",
+		pid,
+		strings.ReplaceAll(exePath, "'", "''"),
+	)
+	cmd := exec.Command(
+		"powershell.exe",
+		"-NoProfile",
+		"-ExecutionPolicy", "Bypass",
+		"-WindowStyle", "Hidden",
+		"-Command", psCommand,
+	)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	_ = cmd.Start()
 }
 
 func killBackgroundInstances() {

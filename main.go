@@ -78,29 +78,72 @@ func runBackground() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatalf("load config: %v", err)
-	}
-
 	rt := monitor.NewRuntime()
 	fileLog := support.NewFileLogWriter()
 	log.SetOutput(io.MultiWriter(os.Stdout, rt.Writer(), fileLog))
 	rt.SetMeta("app_name", "sycronizafhir")
 	rt.SetMeta("mode", "background")
 
-	queueDB, err := db.NewSQLiteQueue(cfg.SQLitePath)
-	if err != nil {
-		log.Fatalf("open sqlite queue: %v", err)
-	}
-	defer queueDB.Close()
+	var queueDB *db.QueueSQLite
+	defer func() {
+		if queueDB != nil {
+			queueDB.Close()
+		}
+	}()
 
-	if err := bootSyncWorkers(ctx, rt, &cfg, queueDB); err != nil {
-		log.Fatalf("boot workers: %v", err)
+	// Arranque resiliente: un corte transitorio de PG/Supabase/config NO debe
+	// matar el proceso (así el "always-on" no depende de que el watchdog lo
+	// relance). Reintenta con backoff y deja rastro en el log de incidentes.
+	backoff := 5 * time.Second
+	const maxBackoff = 2 * time.Minute
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		bootErr := attemptBackgroundBoot(ctx, rt, &queueDB)
+		if bootErr == nil {
+			break
+		}
+
+		rt.SetComponentStatus("app", "error", bootErr.Error())
+		log.Printf("error | background | arranque falló, reintento en %s: %v", backoff, bootErr)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		if backoff < maxBackoff {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
 	}
 
 	<-ctx.Done()
 	log.Println("background shutdown")
+}
+
+// attemptBackgroundBoot intenta un arranque completo (config + cola SQLite +
+// workers). Reutiliza la cola SQLite ya abierta entre reintentos.
+func attemptBackgroundBoot(ctx context.Context, rt *monitor.Runtime, queueDB **db.QueueSQLite) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if *queueDB == nil {
+		q, err := db.NewSQLiteQueue(cfg.SQLitePath)
+		if err != nil {
+			return fmt.Errorf("open sqlite queue: %w", err)
+		}
+		*queueDB = q
+	}
+	if err := bootSyncWorkers(ctx, rt, &cfg, *queueDB); err != nil {
+		return fmt.Errorf("boot workers: %w", err)
+	}
+	return nil
 }
 
 func runWithWindow() {
@@ -201,8 +244,15 @@ func runWithWindow() {
 
 	workerCancel()
 
+	if !app.quitForUpdate.Load() {
+		rt.AddLog("monitor cerrado: relanzando sincronizador en segundo plano")
+		scheduleBackgroundRelaunch()
+	}
+
 	if err != nil {
-		log.Fatalf("wails run: %v", err)
+		// No usar Fatalf: dejamos que los defers cierren SQLite y liberen el mutex
+		// antes de que el relanzamiento en segundo plano tome el control.
+		log.Printf("wails run: %v", err)
 	}
 
 	rt.AddLog("aplicacion finalizada")
@@ -339,44 +389,30 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 	rt.SetMeta("inbound_pedidos_tienda_every", cfg.InboundPedidosTiendaInterval.String())
 	rt.SetMeta("storage_bucket_productos", cfg.StorageBucketProductos)
 
+	workers := []struct {
+		name string
+		run  func(context.Context)
+	}{
+		{"outbound", outbound.Run},
+		{"inbound", inbound.Run},
+		{"presence", presence.Run},
+		{"audit", audit.Run},
+		{"image_sync", imageSync.Run},
+		{"clientes_inbound", clientesInbound.Run},
+		{"pedidos_inbound", pedidosInbound.Run},
+		{"pedido_pagina_inbound", pedidoPaginaInbound.Run},
+		{"pedidos_tienda_inbound", pedidosTiendaInbound.Run},
+	}
+
 	wg := &sync.WaitGroup{}
-	wg.Add(9)
-	go func() {
-		defer wg.Done()
-		outbound.Run(ctx)
-	}()
-	go func() {
-		defer wg.Done()
-		inbound.Run(ctx)
-	}()
-	go func() {
-		defer wg.Done()
-		presence.Run(ctx)
-	}()
-	go func() {
-		defer wg.Done()
-		audit.Run(ctx)
-	}()
-	go func() {
-		defer wg.Done()
-		imageSync.Run(ctx)
-	}()
-	go func() {
-		defer wg.Done()
-		clientesInbound.Run(ctx)
-	}()
-	go func() {
-		defer wg.Done()
-		pedidosInbound.Run(ctx)
-	}()
-	go func() {
-		defer wg.Done()
-		pedidoPaginaInbound.Run(ctx)
-	}()
-	go func() {
-		defer wg.Done()
-		pedidosTiendaInbound.Run(ctx)
-	}()
+	wg.Add(len(workers))
+	for _, worker := range workers {
+		worker := worker
+		go func() {
+			defer wg.Done()
+			runWorkerWithRecover(ctx, rt, worker.name, worker.run)
+		}()
+	}
 
 	go func() {
 		<-ctx.Done()
@@ -389,4 +425,46 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 	}()
 
 	return nil
+}
+
+// runWorkerWithRecover ejecuta el loop de un worker protegido con recover: un
+// panic en un worker no debe tumbar todo el proceso. Ante panic (o retorno
+// inesperado con el contexto aún vivo) relanza el worker tras una pausa breve.
+func runWorkerWithRecover(ctx context.Context, rt *monitor.Runtime, name string, run func(context.Context)) {
+	const relaunchDelay = 5 * time.Second
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		panicked := runWorkerOnce(ctx, rt, name, run)
+		if ctx.Err() != nil {
+			return
+		}
+		if panicked {
+			rt.AddLog(fmt.Sprintf("worker %s: relanzando tras panic en %s", name, relaunchDelay))
+		} else {
+			rt.AddLog(fmt.Sprintf("worker %s: terminó inesperadamente, relanzando en %s", name, relaunchDelay))
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(relaunchDelay):
+		}
+	}
+}
+
+func runWorkerOnce(ctx context.Context, rt *monitor.Runtime, name string, run func(context.Context)) (panicked bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			panicked = true
+			msg := fmt.Sprintf("worker %s panic recuperado: %v", name, r)
+			log.Printf("error | worker | %s", msg)
+			rt.AddLog(msg)
+			rt.SetComponentStatus(name, "error", msg)
+		}
+	}()
+	run(ctx)
+	return false
 }

@@ -4,6 +4,14 @@ Documento vivo: decisiones de producto, contrato de datos local ↔ Supabase, y 
 
 ---
 
+## 🔴 P0 pendiente (2026-07-16) — Desacoplar "subida manual" de `enabled_tables` permanente
+
+Incidente en producción (MICA): destildar una tabla en la UI para una subida rápida **persiste** `sync-tables.json` y apaga esa tabla en el background para siempre (quedó `enabled_tables: ["clientes"]` y productos dejó de subir). El botón "Subir seleccionadas" y la config permanente comparten el mismo estado `selectedTables`; `toggleTable` llama a `saveConfigMutation` en cada click (`frontend/src/views/SyncView.tsx`).
+
+Detalle completo, evidencia y recomendaciones (incluye watchdog/always-on e inbound bad handshake): ver **`docs/NOTA-2026-07-16-solapamiento-config-permanente-vs-subida-manual.md`**.
+
+---
+
 ## 1) Qué “bases de datos” intervienen hoy
 
 | Rol | Qué es en la práctica | Cómo se configura |

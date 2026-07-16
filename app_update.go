@@ -25,6 +25,8 @@ func (a *App) ApplyUpdate() updater.ApplyResult {
 		return result
 	}
 
+	a.quitForUpdate.Store(true)
+
 	if a.ctx != nil {
 		a.runtime.AddLog("actualizacion: cerrando aplicacion para aplicar release")
 		go func() {

@@ -132,6 +132,15 @@ export interface SyncTablesConfig {
   table_mappings: Record<string, string>;
   auto_audit_interval_hours: number;
   auto_sync_on_audit: boolean;
+  allow_core_disable?: boolean;
+}
+
+export interface SaveSyncTablesConfigResult {
+  success: boolean;
+  message: string;
+  needs_confirm: boolean;
+  removed_core: string[];
+  config: SyncTablesConfig;
 }
 
 export interface AvailableSyncTable {

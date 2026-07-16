@@ -10,6 +10,8 @@ import {
   ImageIcon,
   Loader2,
   XCircle,
+  Save,
+  ShieldCheck,
 } from "lucide-react";
 
 import { Topbar } from "@/components/layout/Topbar";
@@ -24,6 +26,15 @@ import type {
   PendingProductImage,
   TableAuditResult,
 } from "@/types/domain";
+
+const CORE_TABLES = ["clientes", "productos", "productos_depositos"];
+
+function sameTableSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sortedA = [...a].sort().join(",");
+  const sortedB = [...b].sort().join(",");
+  return sortedA === sortedB;
+}
 
 function statusBadge(status: string) {
   switch (status) {
@@ -86,8 +97,10 @@ function AuditRow({ row }: { row: TableAuditResult }) {
 
 export function SyncView() {
   const queryClient = useQueryClient();
-  const [selectedTables, setSelectedTables] = useState<string[]>([]);
+  const [selectedForUpload, setSelectedForUpload] = useState<string[]>([]);
+  const [enabledDraft, setEnabledDraft] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+  const [configFeedback, setConfigFeedback] = useState<{ ok: boolean; text: string } | null>(null);
   const [imageFeedback, setImageFeedback] = useState<{ ok: boolean; text: string } | null>(null);
 
   const { data: configSummary } = useQuery({
@@ -112,17 +125,29 @@ export function SyncView() {
   });
 
   const saveConfigMutation = useMutation({
-    mutationFn: (enabled: string[]) =>
+    mutationFn: ({
+      enabled,
+      allowCoreDisable,
+    }: {
+      enabled: string[];
+      allowCoreDisable: boolean;
+    }) =>
       bridge.saveSyncTablesConfig({
         enabled_tables: enabled,
         table_mappings: syncConfig?.table_mappings ?? { articulos: "productos" },
         auto_audit_interval_hours: syncConfig?.auto_audit_interval_hours ?? 6,
         auto_sync_on_audit: syncConfig?.auto_sync_on_audit ?? true,
+        allow_core_disable: allowCoreDisable,
       }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["sync-tables-config"] });
-      await queryClient.invalidateQueries({ queryKey: ["available-sync-tables"] });
+    onSuccess: async (result) => {
+      setConfigFeedback({ ok: result.success, text: result.message });
+      if (result.success) {
+        await queryClient.invalidateQueries({ queryKey: ["sync-tables-config"] });
+        await queryClient.invalidateQueries({ queryKey: ["available-sync-tables"] });
+      }
     },
+    onError: (error: Error) =>
+      setConfigFeedback({ ok: false, text: error.message }),
   });
 
   const auditMutation = useMutation({
@@ -135,7 +160,7 @@ export function SyncView() {
   });
 
   const syncMutation = useMutation({
-    mutationFn: () => bridge.syncSelectedTables(selectedTables),
+    mutationFn: () => bridge.syncSelectedTables(selectedForUpload),
     onSuccess: async (result) => {
       setFeedback({ ok: result.success, text: result.message });
       await refetchAudit();
@@ -183,10 +208,16 @@ export function SyncView() {
     refetchInterval: imageSyncMutation.isPending ? 3000 : 30000,
   });
 
+  const savedEnabled = useMemo(
+    () => (availableTables ?? []).filter((t) => t.enabled).map((t) => t.name),
+    [availableTables]
+  );
+
   useEffect(() => {
     if (!availableTables) return;
     const enabled = availableTables.filter((t) => t.enabled).map((t) => t.name);
-    setSelectedTables(enabled);
+    setEnabledDraft(enabled);
+    setSelectedForUpload(enabled);
   }, [availableTables]);
 
   const refreshSyncPanels = useCallback(async () => {
@@ -225,14 +256,53 @@ export function SyncView() {
     };
   }, [refreshSyncPanels]);
 
-  const toggleTable = (name: string) => {
-    setSelectedTables((prev) => {
-      const next = prev.includes(name)
+  const toggleUpload = (name: string) => {
+    setSelectedForUpload((prev) =>
+      prev.includes(name)
         ? prev.filter((item) => item !== name)
-        : [...prev, name];
-      saveConfigMutation.mutate(next);
-      return next;
-    });
+        : [...prev, name]
+    );
+  };
+
+  const toggleEnabled = (name: string) => {
+    setEnabledDraft((prev) =>
+      prev.includes(name)
+        ? prev.filter((item) => item !== name)
+        : [...prev, name]
+    );
+  };
+
+  const hasConfigChanges = useMemo(
+    () => !sameTableSet(savedEnabled, enabledDraft),
+    [savedEnabled, enabledDraft]
+  );
+
+  const handleSaveConfig = () => {
+    const removedCore = CORE_TABLES.filter((core) => !enabledDraft.includes(core));
+    let allowCoreDisable = false;
+    if (enabledDraft.length === 0) {
+      setConfigFeedback({
+        ok: false,
+        text: "Tenés que dejar al menos una tabla habilitada.",
+      });
+      return;
+    }
+    if (removedCore.length > 0) {
+      const confirmed = window.confirm(
+        `Vas a APAGAR la sincronización en segundo plano de: ${removedCore.join(", ")}.\n\n` +
+          "Estas tablas sostienen la tienda (catálogo, clientes, stock). " +
+          "Si las apagás, dejarán de subir a Supabase.\n\n¿Confirmás igual?"
+      );
+      if (!confirmed) return;
+      allowCoreDisable = true;
+    }
+    setConfigFeedback(null);
+    saveConfigMutation.mutate({ enabled: enabledDraft, allowCoreDisable });
+  };
+
+  const handleResetConfig = () => {
+    setEnabledDraft(savedEnabled);
+    setConfigFeedback(null);
   };
 
   const auditRows = useMemo(
@@ -498,9 +568,15 @@ export function SyncView() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Tablas sincronizables</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-primary" />
+              Configuración permanente (segundo plano)
+            </CardTitle>
             <CardDescription>
-              Por defecto solo clientes y productos. Otras tablas suben sin pedir detalles.
+              Tablas que el sincronizador mantiene subiendo <strong>siempre</strong> en
+              segundo plano. Esto NO cambia con "Subir seleccionadas": solo se aplica al
+              tocar «Guardar configuración». Las tablas core (clientes, productos,
+              productos_depositos) sostienen la tienda y piden confirmación para apagarse.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -509,13 +585,96 @@ export function SyncView() {
             ) : (
               <div className="flex flex-wrap gap-2">
                 {(availableTables ?? []).map((table: AvailableSyncTable) => {
-                  const checked = selectedTables.includes(table.name);
+                  const checked = enabledDraft.includes(table.name);
+                  const isCore = CORE_TABLES.includes(table.name);
                   return (
                     <Button
                       key={table.name}
                       variant={checked ? "default" : "outline"}
                       size="sm"
-                      onClick={() => toggleTable(table.name)}
+                      onClick={() => toggleEnabled(table.name)}
+                      title={isCore ? "Tabla core (sostiene la tienda)" : undefined}
+                    >
+                      {isCore ? <ShieldCheck className="mr-1 h-3 w-3" /> : null}
+                      {table.name}
+                      {table.remote_name !== table.name ? ` → ${table.remote_name}` : ""}
+                    </Button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                disabled={!hasConfigChanges || saveConfigMutation.isPending}
+                onClick={handleSaveConfig}
+              >
+                {saveConfigMutation.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                )}
+                Guardar configuración
+              </Button>
+              <Button
+                variant="outline"
+                disabled={!hasConfigChanges || saveConfigMutation.isPending}
+                onClick={handleResetConfig}
+              >
+                Descartar cambios
+              </Button>
+            </div>
+
+            {hasConfigChanges ? (
+              <p className="text-xs text-warning">
+                Hay cambios sin guardar. El sincronizador seguirá usando la configuración
+                anterior hasta que toques «Guardar configuración».
+              </p>
+            ) : null}
+
+            {configFeedback ? (
+              <div
+                className={`rounded-lg border px-3 py-2 text-sm flex items-start gap-2 ${
+                  configFeedback.ok
+                    ? "border-success/40 bg-success/10 text-success"
+                    : "border-destructive/40 bg-destructive/10 text-destructive"
+                }`}
+              >
+                {configFeedback.ok ? (
+                  <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                )}
+                <span>{configFeedback.text}</span>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Upload className="h-4 w-4 text-primary" />
+              Subida manual (acción puntual)
+            </CardTitle>
+            <CardDescription>
+              Elegí tablas y subilas ahora sin tocar la configuración permanente. Esta
+              selección es temporal y NO apaga la sincronización en segundo plano.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {loadingTables || loadingConfig ? (
+              <p className="text-sm text-muted-foreground">Cargando tablas...</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {(availableTables ?? []).map((table: AvailableSyncTable) => {
+                  const checked = selectedForUpload.includes(table.name);
+                  return (
+                    <Button
+                      key={table.name}
+                      variant={checked ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => toggleUpload(table.name)}
                     >
                       {table.name}
                       {table.remote_name !== table.name ? ` → ${table.remote_name}` : ""}
@@ -550,7 +709,7 @@ export function SyncView() {
                 Auditar y subir diffs
               </Button>
               <Button
-                disabled={syncMutation.isPending || selectedTables.length === 0}
+                disabled={syncMutation.isPending || selectedForUpload.length === 0}
                 onClick={() => syncMutation.mutate()}
               >
                 <Upload className="mr-2 h-4 w-4" />

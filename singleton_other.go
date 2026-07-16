@@ -13,3 +13,5 @@ func acquireMutex(_ string) (*instanceLock, bool, error) {
 func ensureBackgroundReleased() bool {
 	return true
 }
+
+func scheduleBackgroundRelaunch() {}

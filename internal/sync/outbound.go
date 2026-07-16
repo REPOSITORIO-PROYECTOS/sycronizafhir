@@ -121,6 +121,16 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 			rows = w.imageResolver.ResolveProductRows(ctx, rows)
 		}
 
+		if fields := syncCfg.CloudOwnedFieldsFor(table.Name); len(fields) > 0 {
+			preserved, guardErr := applyCloudOwnedOutboundGuard(ctx, w.pgClient, "public", table.Name, table.PrimaryKeys, rows, fields)
+			if guardErr != nil {
+				log.Printf("outbound %s cloud-owned guard skipped: %v", table.Name, guardErr)
+				w.runtime.AddLog(fmt.Sprintf("outbound %s: guarda campos nube omitida (%v)", table.Name, guardErr))
+			} else if preserved > 0 {
+				w.runtime.AddLog(fmt.Sprintf("outbound %s: preservados %d campos propiedad de la nube (no pisar)", table.Name, preserved))
+			}
+		}
+
 		if err = w.pgClient.UpsertRows(ctx, "public", table.Name, rows, table.PrimaryKeys); err != nil {
 			payload := queuedOutboundPayload{
 				TableName:       table.Name,
@@ -164,6 +174,8 @@ func (w *OutboundWorker) retryQueuedOutbound(ctx context.Context) error {
 		return err
 	}
 
+	syncCfg, _ := config.LoadSyncTablesConfig()
+
 	failedJobs := make([]string, 0)
 	for _, job := range jobs {
 		var payload queuedOutboundPayload
@@ -175,6 +187,15 @@ func (w *OutboundWorker) retryQueuedOutbound(ctx context.Context) error {
 		rows := payload.Rows
 		if payload.TableName == "productos" && w.imageResolver != nil && w.imageResolver.Enabled() {
 			rows = w.imageResolver.ResolveProductRows(ctx, rows)
+		}
+
+		if fields := syncCfg.CloudOwnedFieldsFor(payload.TableName); len(fields) > 0 {
+			preserved, guardErr := applyCloudOwnedOutboundGuard(ctx, w.pgClient, "public", payload.TableName, payload.ConflictColumns, rows, fields)
+			if guardErr != nil {
+				log.Printf("retry outbound %s cloud-owned guard skipped: %v", payload.TableName, guardErr)
+			} else if preserved > 0 {
+				w.runtime.AddLog(fmt.Sprintf("retry outbound %s: preservados %d campos propiedad de la nube", payload.TableName, preserved))
+			}
 		}
 
 		if err = w.pgClient.UpsertRows(ctx, "public", payload.TableName, rows, payload.ConflictColumns); err != nil {

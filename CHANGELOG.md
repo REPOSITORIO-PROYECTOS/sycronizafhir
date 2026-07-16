@@ -3,6 +3,37 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.6.0] - 2026-07-16
+
+### Agregado
+
+- **Subida manual desacoplada de la config permanente**: en el panel Sincronización, "Subir seleccionadas" ahora usa una selección efímera propia y **nunca** escribe `sync-tables.json`. La configuración de tablas de fondo se edita aparte y se aplica con el botón **"Guardar configuración"** (con confirmación si apaga tablas core). Corrige el incidente MICA donde una subida rápida dejaba `enabled_tables: ["clientes"]` y productos dejaba de subir.
+- **Tablas core protegidas**: `clientes`, `productos`, `productos_depositos` no se pueden dejar deshabilitadas sin doble confirmación; el backend rechaza `enabled_tables` vacío y loguea cada cambio de configuración (origen GUI).
+- **Always-on real**: al cerrar el monitor se **relanza** el sincronizador en segundo plano (`--background`) sin cortes ni depender solo del watchdog externo; se respeta el flujo de actualización (no relanza durante un update).
+- **Allowlist genérica de campos "propiedad de la nube"** (`cloud_owned_fields` en `sync-tables.json`): el outbound no pisa esos campos con un valor local deshabilitado. Generaliza la guarda del flag `web` (default `{ "clientes": ["web"] }`).
+
+### Corregido
+
+- **Resiliencia del background**: `runBackground` ya no muere con `log.Fatalf` ante errores transitorios de config/DB/Supabase; reintenta con backoff (5 s → 2 min) y deja rastro en el log de incidentes.
+- **Aislamiento de workers**: cada worker corre con `recover()` y se relanza ante un panic, para que una falla puntual no tumbe todo el proceso.
+- **clientes mapeo web**: `web` (S/N) es el único flag de alta tienda; `clien_web` queda como URL/contacto legacy y ya no se trata como alias del flag en inbound ni en la guarda outbound.
+
+### Documentación
+
+- Checklist operativo: tiempos de imágenes (auto 5 min / 150 por ciclo vía `IMAGE_SYNC_*`; "Subir ahora" = todo) y aclaración de que el intervalo de auditoría efectivo es `SYNC_AUDIT_INTERVAL_HOURS` del `.env` (no `auto_audit_interval_hours` del JSON).
+
+## [1.5.20] - 2026-07-16
+
+### Corregido
+
+- **clientes mapeo web**: `web` (S/N) es el único flag de alta tienda; `clien_web` queda como URL/contacto legacy y ya no se trata como alias del flag en inbound ni en la guarda outbound.
+
+## [1.5.19] - 2026-07-16
+
+### Corregido
+
+- **clientes / flag web**: outbound y reconcile ya no pisan un `web=S` (o alta equivalente) en Supabase con `N`/vacío local. Evita el destildado intermitente tras stamps masivos de `fecha_modificacion` (caso Riera 1358).
+
 ## [1.5.18] - 2026-07-08
 
 ### Agregado

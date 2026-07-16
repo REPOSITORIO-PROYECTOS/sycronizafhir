@@ -9,6 +9,7 @@ import type {
   UpdateApplyResult,
   UpdateStatus,
   SyncTablesConfig,
+  SaveSyncTablesConfigResult,
   AvailableSyncTable,
   DataAuditReport,
   DataAuditActionResult,
@@ -43,7 +44,9 @@ interface AppBindings {
   ApplyUpdate: () => Promise<UpdateApplyResult>;
   GetAppVersion: () => Promise<string>;
   GetSyncTablesConfig: () => Promise<SyncTablesConfig>;
-  SaveSyncTablesConfig: (input: SyncTablesConfig) => Promise<SyncTablesConfig>;
+  SaveSyncTablesConfig: (
+    input: SyncTablesConfig
+  ) => Promise<SaveSyncTablesConfigResult>;
   ListAvailableSyncTables: () => Promise<AvailableSyncTable[]>;
   RunDataAudit: (applySync: boolean) => Promise<DataAuditActionResult>;
   GetLastDataAudit: () => Promise<DataAuditReport>;
@@ -360,11 +363,19 @@ export const bridge = {
     }
     return mockSyncConfig;
   },
-  async saveSyncTablesConfig(input: SyncTablesConfig): Promise<SyncTablesConfig> {
+  async saveSyncTablesConfig(
+    input: SyncTablesConfig
+  ): Promise<SaveSyncTablesConfigResult> {
     if (isWailsAvailable()) {
       return wailsWindow.go!.main!.App!.SaveSyncTablesConfig(input);
     }
-    return input;
+    return {
+      success: true,
+      message: "Configuración mock guardada",
+      needs_confirm: false,
+      removed_core: [],
+      config: input,
+    };
   },
   async listAvailableSyncTables(): Promise<AvailableSyncTable[]> {
     if (isWailsAvailable()) {

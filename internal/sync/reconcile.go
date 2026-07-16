@@ -302,6 +302,16 @@ func (s *ReconcileService) SyncSelectedTables(
 	return totalSynced, nil
 }
 
+// cloudOwnedFieldsFor devuelve las columnas propiedad de la nube para una tabla,
+// leyendo la config (con fallback a los defaults que protegen clientes.web).
+func (s *ReconcileService) cloudOwnedFieldsFor(table string) []string {
+	cfg, err := config.LoadSyncTablesConfig()
+	if err != nil {
+		return config.DefaultCloudOwnedFields()[table]
+	}
+	return cfg.CloudOwnedFieldsFor(table)
+}
+
 func (s *ReconcileService) SyncTableDiff(
 	ctx context.Context,
 	table db.SyncTable,
@@ -408,6 +418,16 @@ func (s *ReconcileService) SyncTableDiff(
 		}
 		if table.Name == "productos" && s.imageResolver != nil && s.imageResolver.Enabled() {
 			rows = s.imageResolver.ResolveProductRows(ctx, rows)
+		}
+		if fields := s.cloudOwnedFieldsFor(table.Name); len(fields) > 0 {
+			preserved, guardErr := applyCloudOwnedOutboundGuard(ctx, s.remotePG, "public", remoteTable, table.PrimaryKeys, rows, fields)
+			if guardErr != nil {
+				if s.runtime != nil {
+					s.runtime.AddLog(fmt.Sprintf("sync diff %s: guarda campos nube omitida (%v)", table.Name, guardErr))
+				}
+			} else if preserved > 0 && s.runtime != nil {
+				s.runtime.AddLog(fmt.Sprintf("sync diff %s: preservados %d campos propiedad de la nube", table.Name, preserved))
+			}
 		}
 
 		if upsertErr := s.remotePG.UpsertRows(ctx, "public", remoteTable, rows, table.PrimaryKeys); upsertErr != nil {
