@@ -3,6 +3,13 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.6.10] - 2026-08-21
+
+### Corregido
+
+- **Observabilidad outbound persistente**: el worker de background escribe `%APPDATA%\sycronizafhir\errores\estado\outbound.json` con fecha del último ciclo, tablas habilitadas, checkpoint de `productos` y detalle de errores. Operación ya no depende solo de `app.log` para saber si productos sigue subiendo.
+- **Paquete Windows completo**: el release vuelve a incluir `sync-table.exe` y `compare-counts.exe`, y el instalador los copia a `Program Files\sycronizafhir`. Corrige el faltante detectado en `Servidor Misan`, donde no estaban las herramientas para forzar sync o comparar conteos.
+
 ## [1.6.0] - 2026-07-16
 
 ### Agregado

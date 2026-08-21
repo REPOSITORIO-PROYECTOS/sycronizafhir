@@ -95,6 +95,13 @@ function Install-App {
         Copy-Item $versionSource (Join-Path $InstallDir "version.txt") -Force
     }
 
+    foreach ($helperName in @("sync-table.exe", "compare-counts.exe")) {
+        $helperSource = Join-Path $SourceDir $helperName
+        if (Test-Path $helperSource) {
+            Copy-Item $helperSource (Join-Path $InstallDir $helperName) -Force
+        }
+    }
+
     return $targetExe
 }
 

@@ -9,6 +9,10 @@ $distRoot = Join-Path $root "dist"
 $packageDir = Join-Path $distRoot "sycronizafhir-installer"
 $appExeName = "sycronizafhir-win10plus-amd64.exe"
 $launcherExeName = "sycronizafhir-setup-launcher.exe"
+$helperBinaries = @(
+    @{ Path = "./cmd/sync-table"; Name = "sync-table.exe" },
+    @{ Path = "./cmd/compare-counts"; Name = "compare-counts.exe" }
+)
 $wailsBuildOutput = Join-Path $root "build\bin\sycronizafhir.exe"
 
 function Resolve-Wails {
@@ -68,6 +72,21 @@ try {
     $env:GOARCH = "amd64"
     go build -trimpath -ldflags "-s -w" -o (Join-Path $packageDir $launcherExeName) ./cmd/installer-launcher
     if ($LASTEXITCODE -ne 0) { throw "go build launcher fallo" }
+}
+finally {
+    Pop-Location
+}
+
+Write-Step "Compilando utilidades operativas"
+Push-Location $root
+try {
+    $env:CGO_ENABLED = "0"
+    $env:GOOS = "windows"
+    $env:GOARCH = "amd64"
+    foreach ($helper in $helperBinaries) {
+        go build -trimpath -ldflags "-s -w" -o (Join-Path $packageDir $helper.Name) $helper.Path
+        if ($LASTEXITCODE -ne 0) { throw "go build helper fallo: $($helper.Path)" }
+    }
 }
 finally {
     Pop-Location

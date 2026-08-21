@@ -31,6 +31,14 @@ func ReportsDir() (string, error) {
 	return filepath.Join(errorsDir, "reportes"), nil
 }
 
+func StateDir() (string, error) {
+	errorsDir, err := ErrorsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(errorsDir, "estado"), nil
+}
+
 func IncidentsDir() (string, error) {
 	errorsDir, err := ErrorsDir()
 	if err != nil {
@@ -47,8 +55,16 @@ func AppLogPath() (string, error) {
 	return filepath.Join(errorsDir, "app.log"), nil
 }
 
+func ComponentStatePath(component string) (string, error) {
+	stateDir, err := StateDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(stateDir, sanitizeFilename(component)+".json"), nil
+}
+
 func EnsureDirs() error {
-	for _, dir := range []func() (string, error){ErrorsDir, ReportsDir, IncidentsDir} {
+	for _, dir := range []func() (string, error){ErrorsDir, ReportsDir, IncidentsDir, StateDir} {
 		path, err := dir()
 		if err != nil {
 			return err

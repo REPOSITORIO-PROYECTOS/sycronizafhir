@@ -1,6 +1,7 @@
 package support_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,5 +55,28 @@ func TestRecordIncidentAndBuildReport(t *testing.T) {
 	logPath := filepath.Join(errorsDir, "incidentes.log")
 	if _, err = os.Stat(logPath); err != nil {
 		t.Fatalf("incidentes.log missing: %v", err)
+	}
+
+	if err = support.WriteComponentState("outbound", "running", "ciclo OK", map[string]string{
+		"productos_enabled": "true",
+		"sent_rows":         "12",
+	}); err != nil {
+		t.Fatalf("WriteComponentState: %v", err)
+	}
+
+	statePath, err := support.ComponentStatePath("outbound")
+	if err != nil {
+		t.Fatalf("ComponentStatePath: %v", err)
+	}
+	rawState, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("state file missing: %v", err)
+	}
+	var snapshot support.ComponentStateSnapshot
+	if err = json.Unmarshal(rawState, &snapshot); err != nil {
+		t.Fatalf("unmarshal state: %v", err)
+	}
+	if snapshot.Component != "outbound" || snapshot.Status != "running" {
+		t.Fatalf("unexpected state snapshot: %#v", snapshot)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"sycronizafhir/internal/db"
 	"sycronizafhir/internal/monitor"
 	"sycronizafhir/internal/supabase"
+	"sycronizafhir/internal/support"
 )
 
 const outboundStateKey = "outbound_last_run_utc"
@@ -61,12 +62,14 @@ func (w *OutboundWorker) Run(ctx context.Context) {
 		log.Printf("load outbound checkpoints failed, using startup window: %v", err)
 	}
 	w.runtime.SetComponentStatus("outbound", "running", "worker iniciado")
+	_ = support.WriteComponentState("outbound", "running", "worker iniciado", nil)
 
 	ticker := time.NewTicker(w.pollInterval)
 	defer ticker.Stop()
 
 	if err := w.runCycle(ctx); err != nil {
 		log.Printf("outbound initial cycle failed: %v", err)
+		_ = support.WriteComponentState("outbound", "error", err.Error(), nil)
 	}
 
 	for {
@@ -77,6 +80,7 @@ func (w *OutboundWorker) Run(ctx context.Context) {
 			if err := w.runCycle(ctx); err != nil {
 				log.Printf("outbound cycle failed: %v", err)
 				w.runtime.SetComponentStatus("outbound", "error", err.Error())
+				_ = support.WriteComponentState("outbound", "error", err.Error(), nil)
 			} else {
 				w.runtime.SetComponentStatus("outbound", "running", "ciclo OK")
 			}
@@ -162,9 +166,23 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 		w.runtime.AddLog(fmt.Sprintf("outbound: ciclo OK — %d filas en %d tabla(s)", sentRows, tablesWithChanges))
 	}
 
+	details := w.componentStateDetails(syncCfg, sentRows, tablesWithChanges, failedTables)
+
 	if len(failedTables) > 0 {
+		_ = support.WriteComponentState(
+			"outbound",
+			"error",
+			fmt.Sprintf("ciclo con errores en: %s", strings.Join(failedTables, ", ")),
+			details,
+		)
 		return fmt.Errorf("outbound completed with queued errors for tables: %s", strings.Join(failedTables, ", "))
 	}
+
+	message := "ciclo sin cambios"
+	if sentRows > 0 {
+		message = fmt.Sprintf("ciclo OK — %d filas en %d tabla(s)", sentRows, tablesWithChanges)
+	}
+	_ = support.WriteComponentState("outbound", "running", message, details)
 	return nil
 }
 
@@ -300,4 +318,39 @@ func (w *OutboundWorker) persistTableCheckpoint(ctx context.Context, tableName s
 
 func outboundTableStateKey(tableName string) string {
 	return outboundStateKey + "_" + tableName
+}
+
+func (w *OutboundWorker) componentStateDetails(
+	syncCfg config.SyncTablesConfig,
+	sentRows int,
+	tablesWithChanges int,
+	failedTables []string,
+) map[string]string {
+	details := map[string]string{
+		"sent_rows":            fmt.Sprintf("%d", sentRows),
+		"tables_with_changes":  fmt.Sprintf("%d", tablesWithChanges),
+		"poll_interval":        w.pollInterval.String(),
+		"productos_enabled":    fmt.Sprintf("%t", syncCfg.IsEnabled("productos")),
+		"productos_checkpoint": "",
+	}
+
+	enabled := make([]string, 0)
+	for _, name := range syncCfg.EnabledTables {
+		trimmed := strings.TrimSpace(name)
+		if trimmed != "" {
+			enabled = append(enabled, trimmed)
+		}
+	}
+	if len(enabled) > 0 {
+		details["enabled_tables"] = strings.Join(enabled, ",")
+	}
+	if len(failedTables) > 0 {
+		details["failed_tables"] = strings.Join(failedTables, ",")
+	}
+
+	if checkpoint, ok := w.tableSince["productos"]; ok && !checkpoint.IsZero() {
+		details["productos_checkpoint"] = checkpoint.UTC().Format(time.RFC3339Nano)
+	}
+
+	return details
 }

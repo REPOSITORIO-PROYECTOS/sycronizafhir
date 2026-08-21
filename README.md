@@ -104,6 +104,7 @@ go build -o sycronizafhir.exe .
 
 - Resultado esperado:
   - `dist/sycronizafhir-installer/` con binarios y scripts de instalación.
+    Incluye `sycronizafhir-win10plus-amd64.exe`, `sync-table.exe` y `compare-counts.exe`.
   - `dist/sycronizafhir-installer-package.zip` para distribución/auto-update.
   - `dist/agencia-ta-soluciones-setup.exe` si Inno Setup 6 está instalado en la máquina de build.
 
@@ -118,3 +119,10 @@ go build -o sycronizafhir.exe .
 - El setup incluye bootstrapper de WebView2 (`MicrosoftEdgeWebview2Setup.exe`) y lo instala en modo silencioso si el runtime no está presente.
 
 - El setup instala en `Program Files\sycronizafhir`, solicita UAC, registra autoarranque en segundo plano (SYSTEM), crea acceso directo de escritorio y deja desinstalación disponible en “Aplicaciones instaladas” de Windows.
+
+## Observabilidad operativa
+
+- Log principal: `%APPDATA%\sycronizafhir\errores\app.log`
+- Incidentes: `%APPDATA%\sycronizafhir\errores\incidentes.log`
+- Estado persistente por componente: `%APPDATA%\sycronizafhir\errores\estado\`
+  - `outbound.json` deja la última evidencia de ciclo, incluyendo si `productos` está habilitado y el checkpoint de `productos`.
