@@ -3,6 +3,12 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.6.11] - 2026-08-21
+
+### Corregido
+
+- **Trazabilidad de productos en outbound**: `outbound.json` ahora guarda una muestra de hasta 20 `prod_id` enviados en el último ciclo (`productos_updated_ids`) y su cantidad (`productos_updated_count`). Permite ver desde soporte qué productos salieron sin depender del log efímero.
+
 ## [1.6.10] - 2026-08-21
 
 ### Corregido

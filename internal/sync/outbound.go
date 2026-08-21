@@ -36,6 +36,10 @@ type queuedOutboundPayload struct {
 	Rows            []map[string]interface{} `json:"rows"`
 }
 
+type outboundCycleStats struct {
+	productIDs []string
+}
+
 func NewOutboundWorker(
 	localPG *db.LocalPG,
 	queue *db.QueueSQLite,
@@ -107,6 +111,7 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 	failedTables := make([]string, 0)
 	sentRows := 0
 	tablesWithChanges := 0
+	stats := outboundCycleStats{}
 	for _, table := range tables {
 		if !syncCfg.IsEnabled(table.Name) {
 			continue
@@ -157,6 +162,9 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 
 		sentRows += len(rows)
 		tablesWithChanges++
+		if table.Name == "productos" {
+			stats.productIDs = collectProductoIDs(rows, 20)
+		}
 		w.runtime.AddLog(fmt.Sprintf("outbound: subidas %d filas a %s", len(rows), table.Name))
 	}
 
@@ -166,7 +174,7 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 		w.runtime.AddLog(fmt.Sprintf("outbound: ciclo OK — %d filas en %d tabla(s)", sentRows, tablesWithChanges))
 	}
 
-	details := w.componentStateDetails(syncCfg, sentRows, tablesWithChanges, failedTables)
+	details := w.componentStateDetails(syncCfg, sentRows, tablesWithChanges, failedTables, stats)
 
 	if len(failedTables) > 0 {
 		_ = support.WriteComponentState(
@@ -180,7 +188,7 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 
 	message := "ciclo sin cambios"
 	if sentRows > 0 {
-		message = fmt.Sprintf("ciclo OK — %d filas en %d tabla(s)", sentRows, tablesWithChanges)
+		message = fmt.Sprintf("ciclo OK - %d filas en %d tabla(s)", sentRows, tablesWithChanges)
 	}
 	_ = support.WriteComponentState("outbound", "running", message, details)
 	return nil
@@ -325,6 +333,7 @@ func (w *OutboundWorker) componentStateDetails(
 	sentRows int,
 	tablesWithChanges int,
 	failedTables []string,
+	stats outboundCycleStats,
 ) map[string]string {
 	details := map[string]string{
 		"sent_rows":            fmt.Sprintf("%d", sentRows),
@@ -351,6 +360,30 @@ func (w *OutboundWorker) componentStateDetails(
 	if checkpoint, ok := w.tableSince["productos"]; ok && !checkpoint.IsZero() {
 		details["productos_checkpoint"] = checkpoint.UTC().Format(time.RFC3339Nano)
 	}
+	if len(stats.productIDs) > 0 {
+		details["productos_updated_ids"] = strings.Join(stats.productIDs, ",")
+		details["productos_updated_count"] = fmt.Sprintf("%d", len(stats.productIDs))
+	}
 
 	return details
+}
+
+func collectProductoIDs(rows []map[string]interface{}, maxItems int) []string {
+	if maxItems <= 0 {
+		return nil
+	}
+	out := make([]string, 0, maxItems)
+	seen := map[string]bool{}
+	for _, row := range rows {
+		raw := strings.TrimSpace(fmt.Sprintf("%v", row["prod_id"]))
+		if raw == "" || raw == "<nil>" || seen[raw] {
+			continue
+		}
+		seen[raw] = true
+		out = append(out, raw)
+		if len(out) >= maxItems {
+			break
+		}
+	}
+	return out
 }
