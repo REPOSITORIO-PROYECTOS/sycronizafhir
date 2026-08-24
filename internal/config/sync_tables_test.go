@@ -1,13 +1,17 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestRemovedCoreTables(t *testing.T) {
 	removed := RemovedCoreTables([]string{"clientes"})
-	if len(removed) != 2 {
-		t.Fatalf("removed=%v want [productos productos_depositos]", removed)
+	if len(removed) != 4 {
+		t.Fatalf("removed=%v want [productos productos_depositos rubro subrubro]", removed)
 	}
-	if got := RemovedCoreTables([]string{"clientes", "productos", "productos_depositos", "otra"}); len(got) != 0 {
+	if got := RemovedCoreTables([]string{"clientes", "productos", "productos_depositos", "rubro", "subrubro", "otra"}); len(got) != 0 {
 		t.Fatalf("con todas las core presentes no debe reportar removidas, got %v", got)
 	}
 }
@@ -47,5 +51,31 @@ func TestNormalizeCloudOwnedFieldsDropVacios(t *testing.T) {
 	}
 	if _, ok := out[""]; ok {
 		t.Fatal("nombre de tabla vacío debe descartarse")
+	}
+}
+
+func TestLoadSyncTablesConfigDefaultsAutoSyncForLegacyFile(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("APPDATA", tempDir)
+
+	cfgDir := filepath.Join(tempDir, "sycronizafhir")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	payload := []byte(`{"enabled_tables":["clientes","rubro","subrubro"]}`)
+	if err := os.WriteFile(filepath.Join(cfgDir, "sync-tables.json"), payload, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := LoadSyncTablesConfig()
+	if err != nil {
+		t.Fatalf("LoadSyncTablesConfig: %v", err)
+	}
+	if !cfg.AutoSyncOnAudit {
+		t.Fatal("auto_sync_on_audit ausente debe heredar true")
+	}
+	if cfg.AutoAuditIntervalHours != 6 {
+		t.Fatalf("AutoAuditIntervalHours=%d want 6", cfg.AutoAuditIntervalHours)
 	}
 }

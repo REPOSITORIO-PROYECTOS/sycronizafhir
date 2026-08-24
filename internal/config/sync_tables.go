@@ -30,7 +30,7 @@ func DefaultCloudOwnedFields() map[string][]string {
 // CoreTables son las tablas que sostienen la tienda (catálogo, clientes, stock).
 // Nunca deben quedar deshabilitadas por accidente desde la UI (ver incidente MICA
 // 2026-07-16: una "subida rápida" apagó `productos` para siempre).
-var CoreTables = []string{"clientes", "productos", "productos_depositos"}
+var CoreTables = []string{"clientes", "productos", "productos_depositos", "rubro", "subrubro"}
 
 func DefaultSyncTablesConfig() SyncTablesConfig {
 	return SyncTablesConfig{
@@ -91,6 +91,10 @@ func LoadSyncTablesConfig() (SyncTablesConfig, error) {
 	if err = json.Unmarshal(raw, &cfg); err != nil {
 		return defaults, err
 	}
+	var rawFields map[string]json.RawMessage
+	if err = json.Unmarshal(raw, &rawFields); err != nil {
+		return defaults, err
+	}
 
 	if len(cfg.EnabledTables) == 0 {
 		cfg.EnabledTables = defaults.EnabledTables
@@ -106,6 +110,9 @@ func LoadSyncTablesConfig() (SyncTablesConfig, error) {
 	}
 	if cfg.AutoAuditIntervalHours <= 0 {
 		cfg.AutoAuditIntervalHours = defaults.AutoAuditIntervalHours
+	}
+	if _, exists := rawFields["auto_sync_on_audit"]; !exists {
+		cfg.AutoSyncOnAudit = defaults.AutoSyncOnAudit
 	}
 	if cfg.CloudOwnedFields == nil {
 		cfg.CloudOwnedFields = defaults.CloudOwnedFields

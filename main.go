@@ -379,14 +379,12 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 	clientesInbound := syncworker.NewClientesInboundWorker(localPG, supabasePG, queueDB, *cfg, rt)
 	pedidosInbound := syncworker.NewPedidosInboundWorker(localPG, supabasePG, queueDB, *cfg, rt)
 	pedidoPaginaInbound := syncworker.NewPedidoPaginaInboundWorker(localPG, supabasePG, queueDB, *cfg, rt)
-	pedidosTiendaInbound := syncworker.NewPedidosTiendaInboundWorker(localPG, supabasePG, queueDB, *cfg, rt)
 
 	rt.SetMeta("audit_every", cfg.AuditInterval.String())
 	rt.SetMeta("image_sync_every", cfg.ImageSyncInterval.String())
 	rt.SetMeta("inbound_clientes_every", cfg.InboundClientesInterval.String())
 	rt.SetMeta("inbound_pedidos_every", cfg.InboundPedidosInterval.String())
 	rt.SetMeta("inbound_pedido_pagina_every", cfg.InboundPedidoPaginaInterval.String())
-	rt.SetMeta("inbound_pedidos_tienda_every", cfg.InboundPedidosTiendaInterval.String())
 	rt.SetMeta("storage_bucket_productos", cfg.StorageBucketProductos)
 
 	workers := []struct {
@@ -401,7 +399,6 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 		{"clientes_inbound", clientesInbound.Run},
 		{"pedidos_inbound", pedidosInbound.Run},
 		{"pedido_pagina_inbound", pedidoPaginaInbound.Run},
-		{"pedidos_tienda_inbound", pedidosTiendaInbound.Run},
 	}
 
 	wg := &sync.WaitGroup{}
