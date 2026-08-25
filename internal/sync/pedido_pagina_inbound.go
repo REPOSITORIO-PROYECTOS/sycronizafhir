@@ -109,6 +109,11 @@ func (w *PedidoPaginaInboundWorker) runCycle(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Sin detalle no hay hidratación segura: nunca bajar solo cabecera.
+	if localDetailTable == "" || remoteDetailTable == "" {
+		w.runtime.AddLog("inbound pedido_pagina: falta tabla detalle local/remota; no hidrato")
+		return nil
+	}
 
 	synced := 0
 	maxID := w.lastPedidoID
@@ -121,18 +126,28 @@ func (w *PedidoPaginaInboundWorker) runCycle(ctx context.Context) error {
 			continue
 		}
 
+		lines, loadErr := w.remotePG.LoadPedidoPaginaDetails(ctx, "public", remoteDetailTable, pedidoID)
+		if loadErr != nil {
+			return loadErr
+		}
+		// Candado duro: no upsert pedido_pagina sin pedido_pagina_detail
+		// (Traer en Gestiona crea 0000-* vacíos).
+		if len(lines) == 0 {
+			w.runtime.AddLog(fmt.Sprintf(
+				"inbound pedido_pagina: skip id=%d sin líneas (no hidratar)",
+				pedidoID,
+			))
+			if pedidoID > maxID {
+				maxID = pedidoID
+			}
+			continue
+		}
+
 		if err = w.localPG.UpsertPedidoPaginaHead(ctx, w.sourceSchema, head); err != nil {
 			return err
 		}
-
-		if localDetailTable != "" && remoteDetailTable != "" {
-			lines, loadErr := w.remotePG.LoadPedidoPaginaDetails(ctx, "public", remoteDetailTable, pedidoID)
-			if loadErr != nil {
-				return loadErr
-			}
-			if err = w.localPG.ReplacePedidoPaginaDetails(ctx, w.sourceSchema, localDetailTable, pedidoID, lines); err != nil {
-				return err
-			}
+		if err = w.localPG.ReplacePedidoPaginaDetails(ctx, w.sourceSchema, localDetailTable, pedidoID, lines); err != nil {
+			return err
 		}
 
 		synced++

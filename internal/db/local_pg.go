@@ -721,6 +721,10 @@ func (db *LocalPG) ReplacePedidoPaginaDetails(
 	if !safeIdentifierPattern.MatchString(schemaName) || !safeIdentifierPattern.MatchString(detailTable) {
 		return fmt.Errorf("invalid table identifier")
 	}
+	// Nunca borrar detalle para dejar la cabecera huérfana.
+	if len(lines) == 0 {
+		return fmt.Errorf("replace pedido_pagina_detail id=%d: sin líneas (abort)", pedidoID)
+	}
 	if _, err := db.pool.Exec(ctx,
 		fmt.Sprintf(`DELETE FROM %s.%s WHERE pedido_id = $1`, schemaName, detailTable),
 		pedidoID,
@@ -756,42 +760,6 @@ func (db *LocalPG) ReplacePedidoPaginaDetails(
 	return nil
 }
 
-func (db *LocalPG) ResolvePedidosDetalleTable(ctx context.Context, schemaName string) (string, error) {
-	candidates := []string{"pedidos_d", "pedido_detalle"}
-	for _, name := range candidates {
-		ok, err := db.TableExists(ctx, schemaName, name)
-		if err != nil {
-			return "", err
-		}
-		if ok {
-			return name, nil
-		}
-	}
-	return "", nil
-}
-
-func (db *LocalPG) PedidoCabeceraExists(ctx context.Context, schemaName, pedID string) (bool, error) {
-	if !safeIdentifierPattern.MatchString(schemaName) {
-		return false, fmt.Errorf("invalid schema name: %s", schemaName)
-	}
-	pedID = strings.TrimSpace(pedID)
-	if pedID == "" {
-		return false, fmt.Errorf("ped_id vacío")
-	}
-	var one int
-	err := db.pool.QueryRow(ctx,
-		fmt.Sprintf(`SELECT 1 FROM %s.pedidos WHERE TRIM(ped_id) = $1 LIMIT 1`, schemaName),
-		pedID,
-	).Scan(&one)
-	if err == pgx.ErrNoRows {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
 func (db *LocalPG) LookupClienteIDByCuit(ctx context.Context, schemaName, cuitDigits string) (int16, bool, error) {
 	if !safeIdentifierPattern.MatchString(schemaName) {
 		return 0, false, fmt.Errorf("invalid schema name: %s", schemaName)
@@ -821,92 +789,3 @@ func (db *LocalPG) LookupClienteIDByCuit(ctx context.Context, schemaName, cuitDi
 	return clienID, true, nil
 }
 
-func (db *LocalPG) UpsertPedidoCabeceraTienda(ctx context.Context, schemaName string, row map[string]interface{}) error {
-	if !safeIdentifierPattern.MatchString(schemaName) {
-		return fmt.Errorf("invalid schema name: %s", schemaName)
-	}
-	pedID, ok := row["ped_id"].(string)
-	if !ok || strings.TrimSpace(pedID) == "" {
-		return fmt.Errorf("pedidos cabecera missing ped_id")
-	}
-
-	query := fmt.Sprintf(`
-		INSERT INTO %s.pedidos (
-			ped_id, ped_fecha, ped_nombre, ped_gravado, ped_no_gravado, ped_exento,
-			ped_descuento, ped_iva, ped_total, usu_id, clien_id, local_id, estado, ped_obs,
-			fecha_modificacion, hora_modificacion
-		) VALUES (
-			$1, $2, $3, $4, $5, $6,
-			$7, $8, $9, $10, $11, $12, $13, $14, $15, $16
-		)
-	`, schemaName)
-
-	_, err := db.pool.Exec(ctx, query,
-		row["ped_id"],
-		row["ped_fecha"],
-		row["ped_nombre"],
-		row["ped_gravado"],
-		row["ped_no_gravado"],
-		row["ped_exento"],
-		row["ped_descuento"],
-		row["ped_iva"],
-		row["ped_total"],
-		row["usu_id"],
-		row["clien_id"],
-		row["local_id"],
-		row["estado"],
-		row["ped_obs"],
-		row["fecha_modificacion"],
-		row["hora_modificacion"],
-	)
-	return err
-}
-
-func (db *LocalPG) ReplacePedidosDetalleTienda(
-	ctx context.Context,
-	schemaName, detailTable, pedID string,
-	lines []map[string]interface{},
-) error {
-	if !safeIdentifierPattern.MatchString(schemaName) || !safeIdentifierPattern.MatchString(detailTable) {
-		return fmt.Errorf("invalid table identifier")
-	}
-	pedID = strings.TrimSpace(pedID)
-	if pedID == "" {
-		return fmt.Errorf("ped_id vacío")
-	}
-
-	if _, err := db.pool.Exec(ctx,
-		fmt.Sprintf(`DELETE FROM %s.%s WHERE TRIM(ped_id) = $1`, schemaName, detailTable),
-		pedID,
-	); err != nil {
-		return err
-	}
-
-	for _, line := range lines {
-		line["ped_id"] = pedID
-		columns := make([]string, 0, len(line))
-		for key := range line {
-			if safeIdentifierPattern.MatchString(key) {
-				columns = append(columns, key)
-			}
-		}
-		sort.Strings(columns)
-		values := make([]interface{}, 0, len(columns))
-		placeholders := make([]string, 0, len(columns))
-		for i, key := range columns {
-			values = append(values, line[key])
-			placeholders = append(placeholders, fmt.Sprintf("$%d", i+1))
-		}
-		query := fmt.Sprintf(
-			`INSERT INTO %s.%s (%s) VALUES (%s)`,
-			schemaName,
-			detailTable,
-			strings.Join(columns, ", "),
-			strings.Join(placeholders, ", "),
-		)
-		if _, err := db.pool.Exec(ctx, query, values...); err != nil {
-			return err
-		}
-	}
-	return nil
-}

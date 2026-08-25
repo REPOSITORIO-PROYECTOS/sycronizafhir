@@ -3,6 +3,16 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.6.12] - 2026-08-25
+
+### Eliminado
+
+- **Worker `pedidos_tienda_inbound`**: ya no convierte `pedido_pagina` → INSERT en `pedidos`/`pedidos_d` de Mica. Las ventas nuevas viven solo en `pedido_pagina` (+ detail). También se borraron los helpers `UpsertPedidoCabeceraTienda` / `ReplacePedidosDetalleTienda`.
+
+### Corregido
+
+- **Inbound `pedido_pagina`**: no hidrata cabecera sin líneas de detalle (evita `0000-*` vacíos en Gestiona).
+
 ## [1.6.11] - 2026-08-21
 
 ### Corregido
