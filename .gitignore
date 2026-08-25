@@ -33,6 +33,7 @@ frontend/wailsjs/
 release/
 *.zip
 dist-dev/sync-bridge-base/
+.release-worktree-*/
 
 # IDE / tooling
 .cursor/
