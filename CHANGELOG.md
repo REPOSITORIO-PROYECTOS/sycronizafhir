@@ -3,6 +3,12 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [1.6.13] - 2026-08-25
+
+### Corregido
+
+- **`prod_orden` autoritativo en la nube**: el outbound ya no pisa el orden de vitrina/tienda escrito en Supabase con el valor viejo del ERP SQL. Campo `cloud_authoritative_fields` (default `productos: [prod_orden]`).
+
 ## [1.6.12] - 2026-08-25
 
 ### Eliminado

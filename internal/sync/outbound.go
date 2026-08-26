@@ -140,6 +140,16 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 			}
 		}
 
+		if fields := syncCfg.CloudAuthoritativeFieldsFor(table.Name); len(fields) > 0 {
+			preserved, guardErr := applyCloudAuthoritativeOutboundGuard(ctx, w.pgClient, "public", table.Name, table.PrimaryKeys, rows, fields)
+			if guardErr != nil {
+				log.Printf("outbound %s cloud-authoritative guard skipped: %v", table.Name, guardErr)
+				w.runtime.AddLog(fmt.Sprintf("outbound %s: guarda campos autoritativos nube omitida (%v)", table.Name, guardErr))
+			} else if preserved > 0 {
+				w.runtime.AddLog(fmt.Sprintf("outbound %s: preservados %d campos autoritativos nube (prod_orden)", table.Name, preserved))
+			}
+		}
+
 		if err = w.pgClient.UpsertRows(ctx, "public", table.Name, rows, table.PrimaryKeys); err != nil {
 			payload := queuedOutboundPayload{
 				TableName:       table.Name,
@@ -221,6 +231,15 @@ func (w *OutboundWorker) retryQueuedOutbound(ctx context.Context) error {
 				log.Printf("retry outbound %s cloud-owned guard skipped: %v", payload.TableName, guardErr)
 			} else if preserved > 0 {
 				w.runtime.AddLog(fmt.Sprintf("retry outbound %s: preservados %d campos propiedad de la nube", payload.TableName, preserved))
+			}
+		}
+
+		if fields := syncCfg.CloudAuthoritativeFieldsFor(payload.TableName); len(fields) > 0 {
+			preserved, guardErr := applyCloudAuthoritativeOutboundGuard(ctx, w.pgClient, "public", payload.TableName, payload.ConflictColumns, rows, fields)
+			if guardErr != nil {
+				log.Printf("retry outbound %s cloud-authoritative guard skipped: %v", payload.TableName, guardErr)
+			} else if preserved > 0 {
+				w.runtime.AddLog(fmt.Sprintf("retry outbound %s: preservados %d campos autoritativos nube", payload.TableName, preserved))
 			}
 		}
 

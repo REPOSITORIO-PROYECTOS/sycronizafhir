@@ -312,6 +312,14 @@ func (s *ReconcileService) cloudOwnedFieldsFor(table string) []string {
 	return cfg.CloudOwnedFieldsFor(table)
 }
 
+func (s *ReconcileService) cloudAuthoritativeFieldsFor(table string) []string {
+	cfg, err := config.LoadSyncTablesConfig()
+	if err != nil {
+		return config.DefaultCloudAuthoritativeFields()[table]
+	}
+	return cfg.CloudAuthoritativeFieldsFor(table)
+}
+
 func (s *ReconcileService) SyncTableDiff(
 	ctx context.Context,
 	table db.SyncTable,
@@ -427,6 +435,16 @@ func (s *ReconcileService) SyncTableDiff(
 				}
 			} else if preserved > 0 && s.runtime != nil {
 				s.runtime.AddLog(fmt.Sprintf("sync diff %s: preservados %d campos propiedad de la nube", table.Name, preserved))
+			}
+		}
+		if fields := s.cloudAuthoritativeFieldsFor(table.Name); len(fields) > 0 {
+			preserved, guardErr := applyCloudAuthoritativeOutboundGuard(ctx, s.remotePG, "public", remoteTable, table.PrimaryKeys, rows, fields)
+			if guardErr != nil {
+				if s.runtime != nil {
+					s.runtime.AddLog(fmt.Sprintf("sync diff %s: guarda campos autoritativos nube omitida (%v)", table.Name, guardErr))
+				}
+			} else if preserved > 0 && s.runtime != nil {
+				s.runtime.AddLog(fmt.Sprintf("sync diff %s: preservados %d campos autoritativos nube", table.Name, preserved))
 			}
 		}
 

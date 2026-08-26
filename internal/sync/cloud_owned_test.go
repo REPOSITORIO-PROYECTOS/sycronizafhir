@@ -38,6 +38,33 @@ func TestPreserveCloudOwnedFlagsSinCampos(t *testing.T) {
 	}
 }
 
+func TestPreserveCloudAuthoritativeFieldsProdOrden(t *testing.T) {
+	local := []map[string]interface{}{
+		{"prod_id": "A", "prod_orden": 50},
+		{"prod_id": "B", "prod_orden": 1},
+		{"prod_id": "C", "prod_orden": 9},
+	}
+	remote := []map[string]interface{}{
+		{"prod_id": "A", "prod_orden": 3},
+		{"prod_id": "B", "prod_orden": 1},
+		{"prod_id": "C", "prod_orden": nil},
+	}
+
+	preserved := preserveCloudAuthoritativeFields(local, remote, []string{"prod_id"}, []string{"prod_orden"})
+	if preserved != 1 {
+		t.Fatalf("preserved=%d want 1 (solo A)", preserved)
+	}
+	if local[0]["prod_orden"] != 3 {
+		t.Fatalf("A debe quedar con orden nube 3, got %v", local[0]["prod_orden"])
+	}
+	if local[1]["prod_orden"] != 1 {
+		t.Fatalf("B sin cambio, got %v", local[1]["prod_orden"])
+	}
+	if local[2]["prod_orden"] != 9 {
+		t.Fatalf("C nube vacía: ERP 9 debe sobrevivir, got %v", local[2]["prod_orden"])
+	}
+}
+
 func TestCloudFieldEnabled(t *testing.T) {
 	for _, raw := range []interface{}{"N", "", nil, "0", "false"} {
 		if cloudFieldEnabled(raw) {

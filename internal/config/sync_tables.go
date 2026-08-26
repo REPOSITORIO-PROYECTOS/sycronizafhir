@@ -17,6 +17,10 @@ type SyncTablesConfig struct {
 	// campos cuyo alta/estado gobierna Supabase/Picking y que el outbound NO debe
 	// pisar con un valor local deshabilitado (evita drift tipo destildado `web`).
 	CloudOwnedFields map[string][]string `json:"cloud_owned_fields"`
+	// CloudAuthoritativeFields: la nube gana aunque el ERP tenga otro valor
+	// habilitado. Caso: prod_orden escrito por la vitrina en Supabase; sin esta
+	// guarda el outbound SQL→nube lo pisa con el número viejo del ERP.
+	CloudAuthoritativeFields map[string][]string `json:"cloud_authoritative_fields"`
 }
 
 // DefaultCloudOwnedFields protege por defecto el flag `web` de `clientes`
@@ -24,6 +28,13 @@ type SyncTablesConfig struct {
 func DefaultCloudOwnedFields() map[string][]string {
 	return map[string][]string{
 		"clientes": {"web"},
+	}
+}
+
+// DefaultCloudAuthoritativeFields: la nube gana aunque el ERP tenga otro valor.
+func DefaultCloudAuthoritativeFields() map[string][]string {
+	return map[string][]string{
+		"productos": {"prod_orden"},
 	}
 }
 
@@ -38,9 +49,10 @@ func DefaultSyncTablesConfig() SyncTablesConfig {
 		TableMappings: map[string]string{
 			"articulos": "productos",
 		},
-		AutoAuditIntervalHours: 6,
-		AutoSyncOnAudit:        true,
-		CloudOwnedFields:       DefaultCloudOwnedFields(),
+		AutoAuditIntervalHours:   6,
+		AutoSyncOnAudit:          true,
+		CloudOwnedFields:         DefaultCloudOwnedFields(),
+		CloudAuthoritativeFields: DefaultCloudAuthoritativeFields(),
 	}
 }
 
@@ -125,6 +137,15 @@ func LoadSyncTablesConfig() (SyncTablesConfig, error) {
 			}
 		}
 	}
+	if cfg.CloudAuthoritativeFields == nil {
+		cfg.CloudAuthoritativeFields = defaults.CloudAuthoritativeFields
+	} else {
+		for table, fields := range defaults.CloudAuthoritativeFields {
+			if _, exists := cfg.CloudAuthoritativeFields[table]; !exists {
+				cfg.CloudAuthoritativeFields[table] = fields
+			}
+		}
+	}
 
 	return cfg, nil
 }
@@ -140,14 +161,18 @@ func SaveSyncTablesConfig(cfg SyncTablesConfig) error {
 	}
 
 	normalized := SyncTablesConfig{
-		EnabledTables:          normalizeTableNames(cfg.EnabledTables),
-		TableMappings:          normalizeTableMappings(cfg.TableMappings),
-		AutoAuditIntervalHours: cfg.AutoAuditIntervalHours,
-		AutoSyncOnAudit:        cfg.AutoSyncOnAudit,
-		CloudOwnedFields:       normalizeCloudOwnedFields(cfg.CloudOwnedFields),
+		EnabledTables:            normalizeTableNames(cfg.EnabledTables),
+		TableMappings:            normalizeTableMappings(cfg.TableMappings),
+		AutoAuditIntervalHours:   cfg.AutoAuditIntervalHours,
+		AutoSyncOnAudit:          cfg.AutoSyncOnAudit,
+		CloudOwnedFields:         normalizeCloudOwnedFields(cfg.CloudOwnedFields),
+		CloudAuthoritativeFields: normalizeCloudOwnedFields(cfg.CloudAuthoritativeFields),
 	}
 	if len(normalized.CloudOwnedFields) == 0 {
 		normalized.CloudOwnedFields = DefaultCloudOwnedFields()
+	}
+	if len(normalized.CloudAuthoritativeFields) == 0 {
+		normalized.CloudAuthoritativeFields = DefaultCloudAuthoritativeFields()
 	}
 	if normalized.AutoAuditIntervalHours <= 0 {
 		normalized.AutoAuditIntervalHours = 6
@@ -173,6 +198,14 @@ func (c SyncTablesConfig) CloudOwnedFieldsFor(tableName string) []string {
 		return nil
 	}
 	return c.CloudOwnedFields[tableName]
+}
+
+// CloudAuthoritativeFieldsFor: columnas donde la nube gana aunque el ERP tenga otro valor.
+func (c SyncTablesConfig) CloudAuthoritativeFieldsFor(tableName string) []string {
+	if c.CloudAuthoritativeFields == nil {
+		return nil
+	}
+	return c.CloudAuthoritativeFields[tableName]
 }
 
 func (c SyncTablesConfig) IsEnabled(tableName string) bool {

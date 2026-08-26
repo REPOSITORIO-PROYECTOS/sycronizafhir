@@ -73,6 +73,54 @@ func preserveCloudOwnedFlags(
 	return preserved
 }
 
+func cloudValuesEqual(a, b interface{}) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", a)) == strings.TrimSpace(fmt.Sprintf("%v", b))
+}
+
+// preserveCloudAuthoritativeFields copia el valor remoto (si no está vacío)
+// sobre el local cuando difieren. Sirve para prod_orden y similares.
+func preserveCloudAuthoritativeFields(
+	localRows []map[string]interface{},
+	remoteRows []map[string]interface{},
+	pkColumns []string,
+	fields []string,
+) int {
+	if len(localRows) == 0 || len(remoteRows) == 0 || len(fields) == 0 {
+		return 0
+	}
+	remoteByPK := mapRowsByPK(remoteRows, pkColumns)
+	preserved := 0
+	for _, local := range localRows {
+		key, err := PKKey(local, pkColumns)
+		if err != nil {
+			continue
+		}
+		remote, ok := remoteByPK[key]
+		if !ok {
+			continue
+		}
+		for _, column := range fields {
+			remoteValue, hasRemote := remote[column]
+			if !hasRemote || !cloudFieldEnabled(remoteValue) {
+				continue
+			}
+			localValue, hasLocal := local[column]
+			if hasLocal && cloudValuesEqual(localValue, remoteValue) {
+				continue
+			}
+			local[column] = remoteValue
+			preserved++
+		}
+	}
+	return preserved
+}
+
 // applyCloudOwnedOutboundGuard carga las filas remotas por PK y preserva los
 // campos propiedad de la nube. Si falla la lectura remota, no bloquea el upsert.
 func applyCloudOwnedOutboundGuard(
@@ -110,4 +158,42 @@ func applyCloudOwnedOutboundGuard(
 		return 0, err
 	}
 	return preserveCloudOwnedFlags(rows, remoteRows, pkColumns, fields), nil
+}
+
+// applyCloudAuthoritativeOutboundGuard carga filas remotas y fuerza el valor nube.
+func applyCloudAuthoritativeOutboundGuard(
+	ctx context.Context,
+	loader cloudOwnedRowLoader,
+	remoteSchema, remoteTable string,
+	pkColumns []string,
+	rows []map[string]interface{},
+	fields []string,
+) (int, error) {
+	if loader == nil || len(rows) == 0 || len(pkColumns) == 0 || len(fields) == 0 {
+		return 0, nil
+	}
+	pkOnly := make([]map[string]interface{}, 0, len(rows))
+	for _, row := range rows {
+		one := make(map[string]interface{}, len(pkColumns))
+		complete := true
+		for _, column := range pkColumns {
+			value, ok := row[column]
+			if !ok || value == nil {
+				complete = false
+				break
+			}
+			one[column] = value
+		}
+		if complete {
+			pkOnly = append(pkOnly, one)
+		}
+	}
+	if len(pkOnly) == 0 {
+		return 0, nil
+	}
+	remoteRows, err := loader.LoadRowsByPrimaryKeys(ctx, remoteSchema, remoteTable, pkColumns, pkOnly)
+	if err != nil {
+		return 0, err
+	}
+	return preserveCloudAuthoritativeFields(rows, remoteRows, pkColumns, fields), nil
 }

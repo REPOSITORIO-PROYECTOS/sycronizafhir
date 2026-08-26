@@ -32,7 +32,11 @@ func TestDefaultCloudOwnedFieldsProtegeClientesWeb(t *testing.T) {
 		t.Fatalf("clientes debe proteger web por defecto, got %v", fields)
 	}
 	if cfg.CloudOwnedFieldsFor("productos") != nil {
-		t.Fatalf("productos no debe tener campos protegidos por defecto")
+		t.Fatalf("productos no debe tener cloud-owned flags por defecto")
+	}
+	auth := cfg.CloudAuthoritativeFieldsFor("productos")
+	if len(auth) != 1 || auth[0] != "prod_orden" {
+		t.Fatalf("productos authoritative want [prod_orden], got %v", auth)
 	}
 }
 
