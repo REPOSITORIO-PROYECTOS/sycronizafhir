@@ -182,11 +182,26 @@ try {
         exit 0
     }
 
+    $policyPath = Join-Path $PSScriptRoot "version-policy.ps1"
+    if (!(Test-Path $policyPath)) {
+        $policyPath = Join-Path ${env:ProgramFiles} "sycronizafhir\version-policy.ps1"
+    }
+    if (!(Test-Path $policyPath)) {
+        throw "No existe version-policy.ps1 junto al updater"
+    }
+    . $policyPath
+
     $release = Get-LatestRelease -Owner $config.github_owner -Repo $config.github_repo -Token $config.github_token
     $latestVersion = $release.tag_name
     $installedVersion = Get-InstalledVersion
+    $decision = Resolve-SycronUpdateAction -Installed $installedVersion -Latest $latestVersion
+    Write-Log $decision.Message
 
-    if ($installedVersion -eq $latestVersion) {
+    if ($decision.Action -eq 'SkipFloor' -or $decision.Action -eq 'SkipDowngrade' -or $decision.Action -eq 'SkipInvalid') {
+        exit 0
+    }
+
+    if ($decision.Action -eq 'Same') {
         $installDir = Join-Path ${env:ProgramFiles} "sycronizafhir"
         $sourceExe = Join-Path $installDir "sycronizafhir-win10plus-amd64.exe"
         $targetExe = Join-Path $installDir "sycronizafhir.exe"

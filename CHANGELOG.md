@@ -3,6 +3,12 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del repositorio.
 
+## [Unreleased]
+
+### Corregido
+
+- **Auto-update no baja de versión**: `actualizar-sycronizafhir.ps1` compara semver (con o sin `v`), no instala si `latest` < instalada, y rechaza cualquier latest por debajo del floor `1.6.12` (evita reactivar INSERT en `pedidos` ERP).
+
 ## [1.6.13] - 2026-08-25
 
 ### Corregido

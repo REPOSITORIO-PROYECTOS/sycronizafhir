@@ -188,6 +188,7 @@ try {
     Write-Host "[OK] Copiado en: $exePath" -ForegroundColor Green
 
     Copy-Item (Join-Path $sourceDir "actualizar-sycronizafhir.ps1") (Join-Path $installDir "actualizar-sycronizafhir.ps1") -Force
+    Copy-Item (Join-Path $sourceDir "version-policy.ps1") (Join-Path $installDir "version-policy.ps1") -Force
     Copy-Item (Join-Path $sourceDir "actualizar-sycronizafhir.cmd") (Join-Path $installDir "actualizar-sycronizafhir.cmd") -Force
     Copy-Item (Join-Path $sourceDir "desinstalar-sycronizafhir.ps1") (Join-Path $installDir "desinstalar-sycronizafhir.ps1") -Force
     Copy-Item (Join-Path $sourceDir "detener-sycronizafhir.ps1") (Join-Path $installDir "detener-sycronizafhir.ps1") -Force
