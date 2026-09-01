@@ -5,6 +5,12 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.15] - 2026-09-01
+
+### Corregido
+
+- **image_sync re-sube fotos pisadas**: el ciclo automático ya no omite un jpg de `Sys_Image\Fotos\Productos` solo porque hay URL en cache. Compara fecha y tamaño del archivo; si Mica mejoró la foto, vuelve a Storage.
+
 ## [1.6.14] - 2026-09-01
 
 ### Añadido
