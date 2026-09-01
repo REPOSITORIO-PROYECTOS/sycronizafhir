@@ -5,6 +5,10 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+### Corregido
+
+- **`pedidos.estado` picking no se pisa**: el outbound ERP→Supabase ya no vuelve a P/C una cabecera que Picking dejó en K/V/E. El inbound también baja **P** (soltar armado). Gestiona **C** sigue ganando.
+
 ## [1.6.14] - 2026-09-01
 
 ### Añadido

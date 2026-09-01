@@ -153,6 +153,13 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 			}
 		}
 
+		if preserved, guardErr := applyPedidosPickingEstadoOutboundGuard(ctx, w.pgClient, "public", table.Name, table.PrimaryKeys, rows); guardErr != nil {
+			log.Printf("outbound %s picking-estado guard skipped: %v", table.Name, guardErr)
+			w.runtime.AddLog(fmt.Sprintf("outbound %s: guarda estado picking omitida (%v)", table.Name, guardErr))
+		} else if preserved > 0 {
+			w.runtime.AddLog(fmt.Sprintf("outbound %s: preservados %d estado(s) picking en nube (no pisar K/V/E)", table.Name, preserved))
+		}
+
 		if err = w.pgClient.UpsertRows(ctx, "public", table.Name, rows, table.PrimaryKeys); err != nil {
 			payload := queuedOutboundPayload{
 				TableName:       table.Name,
@@ -281,6 +288,12 @@ func (w *OutboundWorker) retryQueuedOutbound(ctx context.Context) error {
 			} else if preserved > 0 {
 				w.runtime.AddLog(fmt.Sprintf("retry outbound %s: preservados %d campos autoritativos nube", payload.TableName, preserved))
 			}
+		}
+
+		if preserved, guardErr := applyPedidosPickingEstadoOutboundGuard(ctx, w.pgClient, "public", payload.TableName, payload.ConflictColumns, rows); guardErr != nil {
+			log.Printf("retry outbound %s picking-estado guard skipped: %v", payload.TableName, guardErr)
+		} else if preserved > 0 {
+			w.runtime.AddLog(fmt.Sprintf("retry outbound %s: preservados %d estado(s) picking en nube", payload.TableName, preserved))
 		}
 
 		if err = w.pgClient.UpsertRows(ctx, "public", payload.TableName, rows, payload.ConflictColumns); err != nil {
