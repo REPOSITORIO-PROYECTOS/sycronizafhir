@@ -199,13 +199,19 @@ func (r *ImageResolver) saveCachedURL(ctx context.Context, cacheKey, fingerprint
 	return r.queue.SetStateValue(ctx, cacheKey, string(payload))
 }
 
-// IsLocalImageCached reports whether a local prod_imagen path was already uploaded to Storage.
+// IsLocalImageCached reports whether this local file was already uploaded
+// and the jpg on disk is still the same (mtime + size from Sys_Image\Fotos\Productos).
+// A newer overwrite must return false so the auto cycle re-uploads.
 func (r *ImageResolver) IsLocalImageCached(ctx context.Context, imagePath string) bool {
 	if r == nil || r.queue == nil {
 		return false
 	}
 	localPath, err := resolveLocalImagePath(r.localBase, imagePath)
 	if err != nil {
+		return false
+	}
+	info, statErr := os.Stat(localPath)
+	if statErr != nil || info.IsDir() {
 		return false
 	}
 	cacheKey := imageCacheKeyPrefix + strings.ToLower(localPath)
@@ -217,7 +223,10 @@ func (r *ImageResolver) IsLocalImageCached(ctx context.Context, imagePath string
 	if err = json.Unmarshal([]byte(raw), &entry); err != nil {
 		return false
 	}
-	return isRemoteImageURL(entry.URL)
+	if !isRemoteImageURL(entry.URL) {
+		return false
+	}
+	return fingerprintMatchesFileInfo(entry.Fingerprint, info)
 }
 
 type ImageSyncWorker struct {
@@ -732,6 +741,42 @@ func buildStorageObjectPath(prodID, filePath string) string {
 func fileFingerprint(content []byte, modTime time.Time, size int64) string {
 	sum := sha256.Sum256(content)
 	return hex.EncodeToString(sum[:]) + ":" + modTime.UTC().Format(time.RFC3339Nano) + ":" + fmt.Sprintf("%d", size)
+}
+
+// fingerprintMatchesFileInfo compares cached mtime+size to the live jpg without reading bytes.
+func fingerprintMatchesFileInfo(fingerprint string, info os.FileInfo) bool {
+	if info == nil {
+		return false
+	}
+	cachedMod, cachedSize, ok := parseImageFingerprintMeta(fingerprint)
+	if !ok {
+		return false
+	}
+	if info.Size() != cachedSize {
+		return false
+	}
+	return info.ModTime().UTC().Format(time.RFC3339Nano) == cachedMod.UTC().Format(time.RFC3339Nano)
+}
+
+func parseImageFingerprintMeta(fingerprint string) (time.Time, int64, bool) {
+	fingerprint = strings.TrimSpace(fingerprint)
+	if len(fingerprint) < 66 || fingerprint[64] != ':' {
+		return time.Time{}, 0, false
+	}
+	rest := fingerprint[65:]
+	lastColon := strings.LastIndex(rest, ":")
+	if lastColon <= 0 || lastColon == len(rest)-1 {
+		return time.Time{}, 0, false
+	}
+	modTime, err := time.Parse(time.RFC3339Nano, rest[:lastColon])
+	if err != nil {
+		return time.Time{}, 0, false
+	}
+	size, err := strconv.ParseInt(rest[lastColon+1:], 10, 64)
+	if err != nil || size < 0 {
+		return time.Time{}, 0, false
+	}
+	return modTime, size, true
 }
 
 func cloneRowMap(row map[string]interface{}) map[string]interface{} {

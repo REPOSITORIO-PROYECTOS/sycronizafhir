@@ -5,11 +5,17 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
-## [1.6.15] - 2026-09-01
+## [1.6.16] - 2026-09-01
 
 ### Corregido
 
 - **`pedidos.estado` picking no se pisa**: el outbound ERP→Supabase ya no vuelve a P/C una cabecera que Picking dejó en K/V/E (casos 901747 P y 901789 C). El inbound también baja **P** (soltar armado). Gestiona **C** sigue ganando sobre un P de nube, no sobre un V de picking.
+
+## [1.6.15] - 2026-09-01
+
+### Corregido
+
+- **image_sync re-sube fotos pisadas**: el ciclo automático ya no omite un jpg de `Sys_Image\Fotos\Productos` solo porque hay URL en cache. Compara fecha y tamaño del archivo; si Mica mejoró la foto, vuelve a Storage.
 
 ## [1.6.14] - 2026-09-01
 
