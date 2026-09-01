@@ -5,6 +5,8 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.14] - 2026-09-01
+
 ### Añadido
 
 - **Perfil SYSTEM `pedido_pagina`**: kit `sync-tables.json` habilita la tabla. El outbound genérico **no** upserta cabeza ni detalle. Worker `pedido_pagina_estado_outbound` hace PATCH **solo `estado`** ERP→Supabase (no INSERT, no pisa email/líneas). `cloud_owned_fields.clientes` y `cloud_authoritative_fields.pedido_pagina` en el kit para que no se pisen.
