@@ -38,6 +38,10 @@ func TestDefaultCloudOwnedFieldsProtegeClientesWeb(t *testing.T) {
 	if len(auth) != 1 || auth[0] != "prod_orden" {
 		t.Fatalf("productos authoritative want [prod_orden], got %v", auth)
 	}
+	pagina := cfg.CloudAuthoritativeFieldsFor("pedido_pagina")
+	if len(pagina) < 1 {
+		t.Fatal("pedido_pagina debe declarar columnas nube por defecto")
+	}
 }
 
 func TestNormalizeCloudOwnedFieldsDropVacios(t *testing.T) {

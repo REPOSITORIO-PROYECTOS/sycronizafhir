@@ -5,6 +5,10 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+### Añadido
+
+- **Perfil SYSTEM `pedido_pagina`**: kit `sync-tables.json` habilita la tabla. El outbound genérico **no** upserta cabeza ni detalle. Worker `pedido_pagina_estado_outbound` hace PATCH **solo `estado`** ERP→Supabase (no INSERT, no pisa email/líneas). `cloud_owned_fields.clientes` y `cloud_authoritative_fields.pedido_pagina` en el kit para que no se pisen.
+
 ### Corregido
 
 - **Auto-update no baja de versión**: `actualizar-sycronizafhir.ps1` compara semver (con o sin `v`), no instala si `latest` < instalada, y rechaza cualquier latest por debajo del floor `1.6.12` (evita reactivar INSERT en `pedidos` ERP).

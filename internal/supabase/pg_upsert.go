@@ -808,6 +808,26 @@ func (c *PGClient) updateExistingRow(ctx context.Context, schemaName, tableName 
 	return tag.RowsAffected() > 0, nil
 }
 
+// PatchExistingColumns hace UPDATE por PK. Nunca INSERT (pedido_pagina.estado).
+func (c *PGClient) PatchExistingColumns(
+	ctx context.Context,
+	schemaName, tableName string,
+	pkColumns []string,
+	row map[string]interface{},
+) (bool, error) {
+	if len(pkColumns) == 0 || row == nil {
+		return false, nil
+	}
+	rowColumns := make([]string, 0, len(row))
+	for name := range row {
+		if safeIdentifierRegex.MatchString(name) {
+			rowColumns = append(rowColumns, name)
+		}
+	}
+	sort.Strings(rowColumns)
+	return c.updateExistingRow(ctx, schemaName, tableName, rowColumns, pkColumns, row)
+}
+
 func mockValueForRequired(required requiredInsertColumn, row map[string]interface{}, conflictColumns []string) interface{} {
 	name := strings.ToLower(required.Name)
 	dataType := strings.ToLower(required.DataType)

@@ -379,6 +379,7 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 	clientesInbound := syncworker.NewClientesInboundWorker(localPG, supabasePG, queueDB, *cfg, rt)
 	pedidosInbound := syncworker.NewPedidosInboundWorker(localPG, supabasePG, queueDB, *cfg, rt)
 	pedidoPaginaInbound := syncworker.NewPedidoPaginaInboundWorker(localPG, supabasePG, queueDB, *cfg, rt)
+	pedidoPaginaEstadoOutbound := syncworker.NewPedidoPaginaEstadoOutboundWorker(localPG, supabasePG, *cfg, rt)
 
 	rt.SetMeta("audit_every", cfg.AuditInterval.String())
 	rt.SetMeta("image_sync_every", cfg.ImageSyncInterval.String())
@@ -399,6 +400,7 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 		{"clientes_inbound", clientesInbound.Run},
 		{"pedidos_inbound", pedidosInbound.Run},
 		{"pedido_pagina_inbound", pedidoPaginaInbound.Run},
+		{"pedido_pagina_estado_outbound", pedidoPaginaEstadoOutbound.Run},
 	}
 
 	wg := &sync.WaitGroup{}
