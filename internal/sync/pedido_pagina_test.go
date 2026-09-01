@@ -118,3 +118,18 @@ func TestPatchPedidoPaginaEstadosNoInsertMissingRemote(t *testing.T) {
 		t.Fatalf("estado=%v want S", stub.rows[0]["estado"])
 	}
 }
+
+func TestNormalizePedidoPaginaEstadoSoloNS(t *testing.T) {
+	if got := normalizePedidoPaginaEstado("S"); got != "S" {
+		t.Fatalf("S: %q", got)
+	}
+	if got := normalizePedidoPaginaEstado("n"); got != "N" {
+		t.Fatalf("n: %q", got)
+	}
+	if got := normalizePedidoPaginaEstado("V"); got != "" {
+		t.Fatalf("V no es estado de pagina, got %q", got)
+	}
+	if got := normalizePedidoPaginaEstado("P"); got != "" {
+		t.Fatalf("P no es estado de pagina, got %q", got)
+	}
+}
