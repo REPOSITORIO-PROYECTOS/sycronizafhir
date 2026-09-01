@@ -71,6 +71,12 @@ func TestPreserveCloudPedidoEstadoNoPisaKConPDeERP(t *testing.T) {
 	if shouldPreserveCloudPedidoEstado("V", "K") {
 		t.Fatal("ERP ya en V no debe volver a K de una nube vieja")
 	}
+	if !shouldPreserveCloudPedidoEstado("P", "V") {
+		t.Fatal("ERP P no debe pisar V de picking (901747)")
+	}
+	if !shouldPreserveCloudPedidoEstado("C", "V") {
+		t.Fatal("ERP C no debe pisar V de picking (901789)")
+	}
 }
 
 func TestMergePedidoEstadoPatchNoDowngradeVToP(t *testing.T) {
