@@ -30,6 +30,7 @@ func TestMainDoesNotRegisterPedidosTiendaInbound(t *testing.T) {
 	}
 	required := []string{
 		`"pedido_pagina_inbound"`,
+		`"pedido_pagina_estado_outbound"`,
 		`"pedidos_inbound"`,
 	}
 	for _, needle := range required {

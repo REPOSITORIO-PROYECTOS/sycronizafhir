@@ -35,6 +35,9 @@ func DefaultCloudOwnedFields() map[string][]string {
 func DefaultCloudAuthoritativeFields() map[string][]string {
 	return map[string][]string{
 		"productos": {"prod_orden"},
+		"pedido_pagina": {
+			"email", "fecha", "mailed", "razonsocial", "cuit", "comentario",
+		},
 	}
 }
 

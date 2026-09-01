@@ -325,6 +325,15 @@ func (s *ReconcileService) SyncTableDiff(
 	table db.SyncTable,
 	remoteTable string,
 ) (int, error) {
+	if isPedidoPaginaDetailTable(table.Name) {
+		if s.runtime != nil {
+			s.runtime.AddLog(fmt.Sprintf("sync diff: skip %s (detalle pedido_pagina es nube)", table.Name))
+		}
+		return 0, nil
+	}
+	if table.Name == pedidoPaginaHeadTable {
+		return s.syncPedidoPaginaEstadoOnly(ctx, table, remoteTable)
+	}
 	audit, err := s.auditTable(ctx, table, remoteTable)
 	if err != nil {
 		return 0, err
@@ -458,6 +467,45 @@ func (s *ReconcileService) SyncTableDiff(
 	}
 
 	return synced, nil
+}
+
+func (s *ReconcileService) syncPedidoPaginaEstadoOnly(
+	ctx context.Context,
+	table db.SyncTable,
+	remoteTable string,
+) (int, error) {
+	localPKRows, err := s.localPG.LoadPrimaryKeyRows(ctx, s.sourceSchema, table.Name, table.PrimaryKeys)
+	if err != nil {
+		return 0, err
+	}
+	if len(localPKRows) == 0 {
+		return 0, nil
+	}
+	applied := 0
+	for start := 0; start < len(localPKRows); start += 200 {
+		end := start + 200
+		if end > len(localPKRows) {
+			end = len(localPKRows)
+		}
+		batch := localPKRows[start:end]
+		localRows, loadErr := s.localPG.LoadRowsByPrimaryKeys(ctx, s.sourceSchema, table.Name, table.PrimaryKeys, batch)
+		if loadErr != nil {
+			return applied, loadErr
+		}
+		remoteRows, loadErr := s.remotePG.LoadRowsByPrimaryKeys(ctx, "public", remoteTable, table.PrimaryKeys, batch)
+		if loadErr != nil {
+			return applied, loadErr
+		}
+		n, patchErr := patchPedidoPaginaEstados(ctx, s.remotePG, localRows, remoteRows)
+		if patchErr != nil {
+			return applied, patchErr
+		}
+		applied += n
+	}
+	if applied > 0 && s.runtime != nil {
+		s.runtime.AddLog(fmt.Sprintf("sync diff pedido_pagina: %d estado(s) PATCH (sin pisar cabeza/detalle)", applied))
+	}
+	return applied, nil
 }
 
 func mapRowsByPK(rows []map[string]interface{}, pkColumns []string) map[string]map[string]interface{} {

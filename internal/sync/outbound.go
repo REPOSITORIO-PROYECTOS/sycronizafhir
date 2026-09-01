@@ -116,6 +116,9 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 		if !syncCfg.IsEnabled(table.Name) {
 			continue
 		}
+		if skipPedidoPaginaGenericOutbound(table.Name) {
+			continue
+		}
 
 		since := w.tableSinceFor(table.Name)
 		rows, readErr := w.localPG.LoadUpdatedRows(ctx, w.sourceSchema, table.Name, since)
@@ -221,6 +224,43 @@ func (w *OutboundWorker) retryQueuedOutbound(ctx context.Context) error {
 		}
 
 		rows := payload.Rows
+		if skipPedidoPaginaGenericOutbound(payload.TableName) {
+			if payload.TableName != pedidoPaginaHeadTable {
+				_ = w.queue.Delete(ctx, job.ID)
+				w.runtime.AddLog(fmt.Sprintf("retry outbound: drop cola %s (detalle nube, no upsert)", payload.TableName))
+				continue
+			}
+			rows = restrictPedidoPaginaOutboundRows(rows)
+			if len(rows) == 0 {
+				_ = w.queue.Delete(ctx, job.ID)
+				continue
+			}
+			patched := 0
+			jobFailed := false
+			for _, row := range rows {
+				ok, patchErr := w.pgClient.PatchExistingColumns(ctx, "public", pedidoPaginaHeadTable, []string{"pedido_id"}, row)
+				if patchErr != nil {
+					jobFailed = true
+					log.Printf("retry queued outbound job failed id=%d table=%s: %v", job.ID, payload.TableName, patchErr)
+					continue
+				}
+				if ok {
+					patched++
+				}
+			}
+			if jobFailed {
+				failedJobs = append(failedJobs, fmt.Sprintf("%d:%s", job.ID, payload.TableName))
+				continue
+			}
+			if patched > 0 {
+				w.runtime.AddLog(fmt.Sprintf("retry outbound pedido_pagina: %d estado(s) PATCH", patched))
+			}
+			if err = w.queue.Delete(ctx, job.ID); err != nil {
+				return err
+			}
+			continue
+		}
+
 		if payload.TableName == "productos" && w.imageResolver != nil && w.imageResolver.Enabled() {
 			rows = w.imageResolver.ResolveProductRows(ctx, rows)
 		}

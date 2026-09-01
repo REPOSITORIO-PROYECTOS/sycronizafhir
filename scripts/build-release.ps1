@@ -97,6 +97,7 @@ $installerAssets = @(
     "installer/windows/instalar-sycronizafhir.ps1",
     "installer/windows/desinstalar-sycronizafhir.ps1",
     "installer/windows/actualizar-sycronizafhir.ps1",
+    "installer/windows/version-policy.ps1",
     "installer/windows/actualizar-sycronizafhir.cmd",
     "installer/windows/detener-sycronizafhir.ps1",
     "installer/windows/abrir-monitor-sycronizafhir.ps1",
