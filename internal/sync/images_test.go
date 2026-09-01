@@ -125,3 +125,35 @@ func TestIsRemoteImageURL(t *testing.T) {
 		t.Fatal("expected local path false")
 	}
 }
+
+func TestFingerprintMatchesFileInfoAfterOverwrite(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	imagePath := filepath.Join(tempDir, "Fotos", "Productos", "PE2644.jpg")
+	if err := os.MkdirAll(filepath.Dir(imagePath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(imagePath, []byte("old-jpeg"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	info, err := os.Stat(imagePath)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	fp := fileFingerprint([]byte("old-jpeg"), info.ModTime(), info.Size())
+	if !fingerprintMatchesFileInfo(fp, info) {
+		t.Fatal("same file should match cached mtime+size")
+	}
+
+	if err := os.WriteFile(imagePath, []byte("new-jpeg-better"), 0o644); err != nil {
+		t.Fatalf("overwrite: %v", err)
+	}
+	newInfo, err := os.Stat(imagePath)
+	if err != nil {
+		t.Fatalf("stat overwrite: %v", err)
+	}
+	if fingerprintMatchesFileInfo(fp, newInfo) {
+		t.Fatal("overwritten jpg in Fotos/Productos must not match old cache")
+	}
+}
