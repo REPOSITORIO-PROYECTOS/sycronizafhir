@@ -14,7 +14,7 @@ import (
 
 const inboundPedidosEstadoStateKey = "inbound_pedidos_estado_last_run_utc"
 
-// PedidosInboundWorker baja estados K/V/E (y bultos) de Supabase → Mica cuando Picking opera.
+// PedidosInboundWorker baja estados P/K/V/E (y bultos) de Supabase → Mica cuando Picking opera.
 type PedidosInboundWorker struct {
 	localPG      *db.LocalPG
 	remotePG     *supabase.PGClient
@@ -98,7 +98,7 @@ func (w *PedidosInboundWorker) runCycle(ctx context.Context) error {
 			return applyErr
 		}
 		if applied > 0 {
-			w.runtime.AddLog(fmt.Sprintf("inbound pedidos: %d cabecera(s) actualizadas en Mica (K/V/E)", applied))
+			w.runtime.AddLog(fmt.Sprintf("inbound pedidos: %d cabecera(s) actualizadas en Mica (P/K/V/E)", applied))
 		} else {
 			w.runtime.AddLog(fmt.Sprintf("inbound pedidos: %d cambio(s) en nube sin patch local", len(remoteRows)))
 		}

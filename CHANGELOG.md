@@ -5,6 +5,18 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.17] - 2026-09-02
+
+### Corregido
+
+- **image_sync no salta talles de una misma foto**: la caché es por `prod_id` + archivo. Varios SKU que apuntan a `PE0789.jpg` (u otro JPG compartido) vuelven a subir cada `{prod_id}.jpg` a Storage; ya no queda el leftover del primer id.
+
+## [1.6.16] - 2026-09-01
+
+### Corregido
+
+- **`pedidos.estado` picking no se pisa**: el outbound ERP→Supabase ya no vuelve a P/C una cabecera que Picking dejó en K/V/E (casos 901747 P y 901789 C). El inbound también baja **P** (soltar armado). Gestiona **C** sigue ganando sobre un P de nube, no sobre un V de picking.
+
 ## [1.6.15] - 2026-09-01
 
 ### Corregido
