@@ -5,6 +5,14 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.18] - 2026-09-09
+
+### Cambiado
+
+- **Inbound `pedidos.estado` más rápido**: default `INBOUND_PEDIDOS_INTERVAL_SECONDS` de 60 → **15**.
+- **Wake desde Picking**: tabla Supabase `sync_inbound_wake` + poll ~5 s. Contabo INSERT tras PATCH K/V/E/P; sycron baja por `ped_id` sin depender solo de `fecha_modificacion`.
+- **Apply sin stamp**: P→K/V/E y K→V/E aplican aunque el stamp remoto no sea “newer” (causa de “esperé >60 s y no pasó”).
+
 ## [1.6.17] - 2026-09-02
 
 ### Corregido

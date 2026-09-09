@@ -69,14 +69,23 @@ func shouldApplyPedidoEstado(localEstado, remoteEstado string, remoteNewer bool)
 	if remoteEstado == "" || remoteEstado == localEstado {
 		return false
 	}
-	if !remoteNewer {
-		return false
-	}
+	// Soltar armado: nube P y local K (stamp no obligatorio: Contabo a veces
+	// PATCHEA sin fecha/hora y el poll de 60s no alcanzaba a aplicar nada).
 	if remoteEstado == "P" {
 		return localEstado == "K"
 	}
 	if _, ok := pedidosEstadoPicking[remoteEstado]; ok {
-		return true
+		if remoteNewer {
+			return true
+		}
+		// Sin stamp confiable: igual avanzar K/V/E sobre ERP P/C o por rank.
+		if localEstado == "" || localEstado == "P" || localEstado == "C" {
+			return true
+		}
+		return pedidoEstadoRank(remoteEstado) > pedidoEstadoRank(localEstado)
+	}
+	if !remoteNewer {
+		return false
 	}
 	return pedidoEstadoRank(remoteEstado) > pedidoEstadoRank(localEstado)
 }

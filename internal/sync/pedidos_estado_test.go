@@ -41,6 +41,31 @@ func TestMergePedidoEstadoPatchNoDowngradeSinFechaNueva(t *testing.T) {
 	}
 }
 
+func TestMergePedidoEstadoPatchPToKSinStampNuevo(t *testing.T) {
+	meta := db.TableModifiedAtMeta{FechaIsDate: true}
+	local := map[string]interface{}{
+		"estado":             "P",
+		"fecha_modificacion": "2026-07-08",
+	}
+	remote := map[string]interface{}{
+		"estado":             "K",
+		"fecha_modificacion": "2026-07-01", // más vieja / sin stamp confiable
+	}
+	patch := mergePedidoEstadoPatch(local, remote, meta)
+	if patch["estado"] != "K" {
+		t.Fatalf("P→K debe aplicar aunque remote no sea newer; got %v", patch)
+	}
+}
+
+func TestShouldApplyPedidoEstadoKToVSinStamp(t *testing.T) {
+	if !shouldApplyPedidoEstado("K", "V", false) {
+		t.Fatal("K→V por rank sin stamp")
+	}
+	if shouldApplyPedidoEstado("V", "K", false) {
+		t.Fatal("V→K sin stamp no debe aplicar")
+	}
+}
+
 func TestMergePedidoEstadoPatchKToP(t *testing.T) {
 	meta := db.TableModifiedAtMeta{FechaIsDate: true}
 	local := map[string]interface{}{
