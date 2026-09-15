@@ -165,3 +165,25 @@ func TestMergePedidoEstadoPatchBulto(t *testing.T) {
 		t.Fatalf("bulto: got %v", patch["bulto"])
 	}
 }
+
+func TestMergePedidoEstadoPatchBultosMisan(t *testing.T) {
+	meta := db.TableModifiedAtMeta{FechaIsDate: true}
+	local := map[string]interface{}{
+		"estado":             "K",
+		"bultos":             nil,
+		"fecha_modificacion": "2026-07-01",
+	}
+	remote := map[string]interface{}{
+		"estado":             "V",
+		"bultos":             5,
+		"fecha_modificacion": "2026-07-08",
+	}
+
+	patch := mergePedidoEstadoPatch(local, remote, meta)
+	if patch["estado"] != "V" {
+		t.Fatalf("estado: got %v", patch["estado"])
+	}
+	if patch["bultos"] != 5 {
+		t.Fatalf("bultos: got %v", patch["bultos"])
+	}
+}

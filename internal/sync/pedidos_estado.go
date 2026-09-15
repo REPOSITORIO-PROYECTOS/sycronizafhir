@@ -22,9 +22,11 @@ var pedidoEstadoStampColumns = []string{
 }
 
 var pedidoBultoColumnCandidates = []string{
+	"bultos",
 	"bulto",
 	"nro_bulto",
 	"ped_bulto",
+	"ped_bultos",
 	"cant_bultos",
 }
 
