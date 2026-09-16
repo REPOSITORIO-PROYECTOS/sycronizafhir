@@ -5,6 +5,12 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.19] - 2026-09-16
+
+### Corregido
+
+- **Inbound `pedidos.bultos` Misan**: al bajar estado K/V/E desde Supabase también replica la columna `bultos` (y alias `bulto` / `nro_bulto`) cuando existe en Gestiona. Sin esto Ops escribía bultos en la nube y SERVIDOR no los aplicaba.
+
 ## [1.6.18] - 2026-09-09
 
 ### Cambiado
