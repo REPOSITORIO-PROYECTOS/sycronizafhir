@@ -341,6 +341,64 @@ func (db *LocalPG) CountTableRows(ctx context.Context, schemaName, tableName str
 	return total, nil
 }
 
+// LoadLatestRowsByColumn trae las N filas más nuevas por una columna clave (ej. ped_id DESC).
+// Sirve de cola de seguridad cuando el watermark de fecha_modificacion se atrasa o el ciclo queda colgado.
+func (db *LocalPG) LoadLatestRowsByColumn(
+	ctx context.Context,
+	schemaName, tableName, column string,
+	limit int,
+) ([]map[string]interface{}, error) {
+	if !safeIdentifierPattern.MatchString(schemaName) {
+		return nil, fmt.Errorf("invalid schema name: %s", schemaName)
+	}
+	if !safeIdentifierPattern.MatchString(tableName) {
+		return nil, fmt.Errorf("invalid table name: %s", tableName)
+	}
+	if !safeIdentifierPattern.MatchString(column) {
+		return nil, fmt.Errorf("invalid column name: %s", column)
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	query := fmt.Sprintf(
+		`SELECT * FROM %s.%s ORDER BY %s DESC LIMIT $1`,
+		schemaName,
+		tableName,
+		column,
+	)
+	rows, err := db.pool.Query(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanRowsToMaps(rows)
+}
+
+// LoadRowsWhereColumnIn carga filas cuyo column ∈ values (p. ej. pedidos_d por lista de ped_id).
+func (db *LocalPG) LoadRowsWhereColumnIn(
+	ctx context.Context,
+	schemaName, tableName, column string,
+	values []interface{},
+) ([]map[string]interface{}, error) {
+	if len(values) == 0 {
+		return []map[string]interface{}{}, nil
+	}
+	if !safeIdentifierPattern.MatchString(schemaName) {
+		return nil, fmt.Errorf("invalid schema name: %s", schemaName)
+	}
+	if !safeIdentifierPattern.MatchString(tableName) {
+		return nil, fmt.Errorf("invalid table name: %s", tableName)
+	}
+	if !safeIdentifierPattern.MatchString(column) {
+		return nil, fmt.Errorf("invalid column name: %s", column)
+	}
+	pkRows := make([]map[string]interface{}, 0, len(values))
+	for _, v := range values {
+		pkRows = append(pkRows, map[string]interface{}{column: v})
+	}
+	return db.loadRowsBySinglePrimaryKey(ctx, schemaName, tableName, column, pkRows)
+}
+
 func (db *LocalPG) LoadTableRowsChunk(ctx context.Context, schemaName, tableName string, offset, limit int, orderBy []string) ([]map[string]interface{}, error) {
 	if !safeIdentifierPattern.MatchString(schemaName) {
 		return nil, fmt.Errorf("invalid schema name: %s", schemaName)

@@ -456,6 +456,13 @@ func (s *ReconcileService) SyncTableDiff(
 				s.runtime.AddLog(fmt.Sprintf("sync diff %s: preservados %d campos autoritativos nube", table.Name, preserved))
 			}
 		}
+		if preserved, guardErr := applyPedidosPickingEstadoOutboundGuard(ctx, s.remotePG, "public", table.Name, table.PrimaryKeys, rows); guardErr != nil {
+			if s.runtime != nil {
+				s.runtime.AddLog(fmt.Sprintf("sync diff %s: guarda estado picking omitida (%v)", table.Name, guardErr))
+			}
+		} else if preserved > 0 && s.runtime != nil {
+			s.runtime.AddLog(fmt.Sprintf("sync diff %s: preservados %d estado(s) picking en nube", table.Name, preserved))
+		}
 
 		if upsertErr := s.remotePG.UpsertRows(ctx, "public", remoteTable, rows, table.PrimaryKeys); upsertErr != nil {
 			return synced, upsertErr
