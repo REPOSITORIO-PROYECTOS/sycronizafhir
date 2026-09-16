@@ -5,6 +5,13 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.20] - 2026-09-16
+
+### Corregido
+
+- **Outbound `pedidos` por clave**: cada ciclo reenvía los últimos 20 `ped_id` (y sus líneas en `pedidos_d`) aunque el watermark de `fecha_modificacion` no los vea. Evita huecos tipo 902801–902805 en nube mientras Contabo espera.
+- **Timeout por tabla (90 s)** en upsert outbound: un upsert/red colgado ya no frena el ciclo entero (síntoma: `outbound.json` congelado >40 min).
+
 ## [1.6.19] - 2026-09-16
 
 ### Corregido

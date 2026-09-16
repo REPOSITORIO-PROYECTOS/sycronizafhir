@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -17,6 +18,12 @@ import (
 
 const outboundStateKey = "outbound_last_run_utc"
 const outboundGenericDirection = "outbound_generic"
+
+// Cola por clave: siempre reenviar los últimos N ped_id aunque fecha_modificacion no avance.
+const outboundPedidosTailLimit = 20
+
+// Tope por tabla para que un upsert/red colgado no frene el ciclo entero (pedidos incluidos).
+const outboundTableTimeout = 90 * time.Second
 
 type OutboundWorker struct {
 	localPG       *db.LocalPG
@@ -125,16 +132,26 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 		if readErr != nil {
 			return readErr
 		}
+
+		if table.Name == "pedidos" {
+			rows = w.mergePedidosTailByPedID(ctx, rows, table.PrimaryKeys)
+		}
+		if table.Name == "pedidos_d" {
+			rows = w.mergePedidosDTailByPedID(ctx, rows)
+		}
+
 		if len(rows) == 0 {
 			continue
 		}
 
+		tableCtx, cancel := context.WithTimeout(ctx, outboundTableTimeout)
+
 		if table.Name == "productos" && w.imageResolver != nil && w.imageResolver.Enabled() {
-			rows = w.imageResolver.ResolveProductRows(ctx, rows)
+			rows = w.imageResolver.ResolveProductRows(tableCtx, rows)
 		}
 
 		if fields := syncCfg.CloudOwnedFieldsFor(table.Name); len(fields) > 0 {
-			preserved, guardErr := applyCloudOwnedOutboundGuard(ctx, w.pgClient, "public", table.Name, table.PrimaryKeys, rows, fields)
+			preserved, guardErr := applyCloudOwnedOutboundGuard(tableCtx, w.pgClient, "public", table.Name, table.PrimaryKeys, rows, fields)
 			if guardErr != nil {
 				log.Printf("outbound %s cloud-owned guard skipped: %v", table.Name, guardErr)
 				w.runtime.AddLog(fmt.Sprintf("outbound %s: guarda campos nube omitida (%v)", table.Name, guardErr))
@@ -144,7 +161,7 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 		}
 
 		if fields := syncCfg.CloudAuthoritativeFieldsFor(table.Name); len(fields) > 0 {
-			preserved, guardErr := applyCloudAuthoritativeOutboundGuard(ctx, w.pgClient, "public", table.Name, table.PrimaryKeys, rows, fields)
+			preserved, guardErr := applyCloudAuthoritativeOutboundGuard(tableCtx, w.pgClient, "public", table.Name, table.PrimaryKeys, rows, fields)
 			if guardErr != nil {
 				log.Printf("outbound %s cloud-authoritative guard skipped: %v", table.Name, guardErr)
 				w.runtime.AddLog(fmt.Sprintf("outbound %s: guarda campos autoritativos nube omitida (%v)", table.Name, guardErr))
@@ -153,14 +170,16 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 			}
 		}
 
-		if preserved, guardErr := applyPedidosPickingEstadoOutboundGuard(ctx, w.pgClient, "public", table.Name, table.PrimaryKeys, rows); guardErr != nil {
+		if preserved, guardErr := applyPedidosPickingEstadoOutboundGuard(tableCtx, w.pgClient, "public", table.Name, table.PrimaryKeys, rows); guardErr != nil {
 			log.Printf("outbound %s picking-estado guard skipped: %v", table.Name, guardErr)
 			w.runtime.AddLog(fmt.Sprintf("outbound %s: guarda estado picking omitida (%v)", table.Name, guardErr))
 		} else if preserved > 0 {
 			w.runtime.AddLog(fmt.Sprintf("outbound %s: preservados %d estado(s) picking en nube (no pisar K/V/E)", table.Name, preserved))
 		}
 
-		if err = w.pgClient.UpsertRows(ctx, "public", table.Name, rows, table.PrimaryKeys); err != nil {
+		err = w.pgClient.UpsertRows(tableCtx, "public", table.Name, rows, table.PrimaryKeys)
+		cancel()
+		if err != nil {
 			payload := queuedOutboundPayload{
 				TableName:       table.Name,
 				ConflictColumns: table.PrimaryKeys,
@@ -171,8 +190,13 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 				_ = w.queue.Enqueue(ctx, outboundGenericDirection, string(raw))
 			}
 			failedTables = append(failedTables, table.Name)
-			log.Printf("outbound table upsert failed for %s: %v", table.Name, err)
-			w.runtime.AddLog(fmt.Sprintf("outbound table %s queued after upsert error: %v", table.Name, err))
+			if errors.Is(err, context.DeadlineExceeded) {
+				log.Printf("outbound table upsert timeout for %s after %s: %v", table.Name, outboundTableTimeout, err)
+				w.runtime.AddLog(fmt.Sprintf("outbound table %s timeout %s (queued): %v", table.Name, outboundTableTimeout, err))
+			} else {
+				log.Printf("outbound table upsert failed for %s: %v", table.Name, err)
+				w.runtime.AddLog(fmt.Sprintf("outbound table %s queued after upsert error: %v", table.Name, err))
+			}
 			continue
 		}
 
@@ -438,6 +462,106 @@ func (w *OutboundWorker) componentStateDetails(
 	}
 
 	return details
+}
+
+func (w *OutboundWorker) mergePedidosTailByPedID(
+	ctx context.Context,
+	rows []map[string]interface{},
+	pkColumns []string,
+) []map[string]interface{} {
+	tail, err := w.localPG.LoadLatestRowsByColumn(ctx, w.sourceSchema, "pedidos", "ped_id", outboundPedidosTailLimit)
+	if err != nil {
+		log.Printf("outbound pedidos tail by ped_id failed: %v", err)
+		w.runtime.AddLog(fmt.Sprintf("outbound pedidos: cola ped_id omitida (%v)", err))
+		return rows
+	}
+	if len(tail) == 0 {
+		return rows
+	}
+	before := len(rows)
+	merged := mergeRowsByPrimaryKeys(rows, tail, pkColumns)
+	added := len(merged) - before
+	if added > 0 {
+		w.runtime.AddLog(fmt.Sprintf("outbound pedidos: cola por ped_id +%d (tail=%d)", added, len(tail)))
+	}
+	return merged
+}
+
+func (w *OutboundWorker) mergePedidosDTailByPedID(
+	ctx context.Context,
+	rows []map[string]interface{},
+) []map[string]interface{} {
+	heads, err := w.localPG.LoadLatestRowsByColumn(ctx, w.sourceSchema, "pedidos", "ped_id", outboundPedidosTailLimit)
+	if err != nil {
+		log.Printf("outbound pedidos_d tail heads failed: %v", err)
+		return rows
+	}
+	values := make([]interface{}, 0, len(heads))
+	seen := make(map[string]struct{}, len(heads))
+	for _, head := range heads {
+		raw, ok := head["ped_id"]
+		if !ok || raw == nil {
+			continue
+		}
+		key := fmt.Sprint(raw)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		values = append(values, raw)
+	}
+	if len(values) == 0 {
+		return rows
+	}
+	tail, err := w.localPG.LoadRowsWhereColumnIn(ctx, w.sourceSchema, "pedidos_d", "ped_id", values)
+	if err != nil {
+		log.Printf("outbound pedidos_d tail by ped_id failed: %v", err)
+		w.runtime.AddLog(fmt.Sprintf("outbound pedidos_d: cola ped_id omitida (%v)", err))
+		return rows
+	}
+	if len(tail) == 0 {
+		return rows
+	}
+	before := len(rows)
+	merged := mergeRowsByPrimaryKeys(rows, tail, []string{"ped_id", "ped_item"})
+	added := len(merged) - before
+	if added > 0 {
+		w.runtime.AddLog(fmt.Sprintf("outbound pedidos_d: cola por ped_id +%d (tail_lines=%d heads=%d)", added, len(tail), len(values)))
+	}
+	return merged
+}
+
+func mergeRowsByPrimaryKeys(
+	base, extra []map[string]interface{},
+	pkColumns []string,
+) []map[string]interface{} {
+	if len(extra) == 0 {
+		return base
+	}
+	if len(pkColumns) == 0 {
+		return append(append([]map[string]interface{}{}, base...), extra...)
+	}
+	out := make([]map[string]interface{}, 0, len(base)+len(extra))
+	seen := make(map[string]struct{}, len(base)+len(extra))
+	appendUnique := func(row map[string]interface{}) {
+		key, err := PKKey(row, pkColumns)
+		if err != nil {
+			out = append(out, row)
+			return
+		}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, row)
+	}
+	for _, row := range base {
+		appendUnique(row)
+	}
+	for _, row := range extra {
+		appendUnique(row)
+	}
+	return out
 }
 
 func collectProductoIDs(rows []map[string]interface{}, maxItems int) []string {
