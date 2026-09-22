@@ -18,7 +18,7 @@ var clientesInboundColumnPairs = [][2]string{
 	{"clien_cuit", "cuit"},
 	{"clien_web", "clien_web"},
 	{"web", "web"},
-	{"coordenadas", "coordenadas"},
+	{"coordenadas_osm", "coordenadas_osm"},
 }
 
 // Solo la columna char `web` gobierna el alta tienda; no mezclar con clien_web.
