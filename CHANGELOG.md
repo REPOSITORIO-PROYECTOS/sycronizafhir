@@ -5,6 +5,12 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.21] - 2026-09-22
+
+### Añadido
+
+- **Inbound clientes `coordenadas`**: baja lat,lng OSM desde Supabase → Mica/Gestiona en la misma columna `coordenadas` (tienda/picking ya escriben ahí).
+
 ## [1.6.20] - 2026-09-16
 
 ### Corregido
