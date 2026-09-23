@@ -27,7 +27,19 @@ type SyncTablesConfig struct {
 // (caso Riera 1358: stamps masivos de fecha_modificacion destildaban la tienda).
 func DefaultCloudOwnedFields() map[string][]string {
 	return map[string][]string{
-		"clientes": {"web"},
+		"clientes": {
+			"web",
+			"instagram",
+			"alias_mp",
+			"clien_telefono", "telefono",
+			"clien_celular", "celular",
+			"clien_domicilio", "domicilio",
+			"clien_localidad", "localidad",
+			"clien_email", "email",
+			"clien_cp", "cp",
+			"provi_id",
+			"coordenadas",
+		},
 	}
 }
 
@@ -37,6 +49,11 @@ func DefaultCloudAuthoritativeFields() map[string][]string {
 		"productos": {"prod_orden"},
 		"pedido_pagina": {
 			"email", "fecha", "mailed", "razonsocial", "cuit", "comentario",
+		},
+		"clientes": {
+			"coordenadas",
+			"clien_celular", "celular",
+			"clien_cp", "cp",
 		},
 	}
 }

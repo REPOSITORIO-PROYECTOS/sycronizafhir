@@ -28,8 +28,18 @@ func TestHasEnabledTables(t *testing.T) {
 func TestDefaultCloudOwnedFieldsProtegeClientesWeb(t *testing.T) {
 	cfg := DefaultSyncTablesConfig()
 	fields := cfg.CloudOwnedFieldsFor("clientes")
-	if len(fields) != 1 || fields[0] != "web" {
-		t.Fatalf("clientes debe proteger web por defecto, got %v", fields)
+	want := map[string]bool{
+		"web": true, "clien_celular": true, "celular": true,
+		"clien_cp": true, "cp": true, "coordenadas": true,
+	}
+	got := map[string]bool{}
+	for _, f := range fields {
+		got[f] = true
+	}
+	for name := range want {
+		if !got[name] {
+			t.Fatalf("clientes debe proteger %s por defecto, got %v", name, fields)
+		}
 	}
 	if cfg.CloudOwnedFieldsFor("productos") != nil {
 		t.Fatalf("productos no debe tener cloud-owned flags por defecto")
@@ -41,6 +51,10 @@ func TestDefaultCloudOwnedFieldsProtegeClientesWeb(t *testing.T) {
 	pagina := cfg.CloudAuthoritativeFieldsFor("pedido_pagina")
 	if len(pagina) < 1 {
 		t.Fatal("pedido_pagina debe declarar columnas nube por defecto")
+	}
+	cliAuth := cfg.CloudAuthoritativeFieldsFor("clientes")
+	if len(cliAuth) < 1 {
+		t.Fatal("clientes debe declarar columnas nube autoritativas por defecto")
 	}
 }
 
