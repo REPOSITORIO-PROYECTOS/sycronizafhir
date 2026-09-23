@@ -5,6 +5,12 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.22] - 2026-09-23
+
+### Corregido
+
+- **`sync-tables.json` con UTF-8 BOM**: `LoadSyncTablesConfig` ignora `EF BB BF`. Evita tumbar outbound con `invalid character '' looking for beginning of value` (incidente cola P 2026-09-23; PowerShell `Set-Content`).
+
 ## [1.6.21] - 2026-09-22
 
 ### Añadido
