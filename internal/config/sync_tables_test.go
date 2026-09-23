@@ -28,8 +28,18 @@ func TestHasEnabledTables(t *testing.T) {
 func TestDefaultCloudOwnedFieldsProtegeClientesWeb(t *testing.T) {
 	cfg := DefaultSyncTablesConfig()
 	fields := cfg.CloudOwnedFieldsFor("clientes")
-	if len(fields) != 1 || fields[0] != "web" {
-		t.Fatalf("clientes debe proteger web por defecto, got %v", fields)
+	want := map[string]bool{
+		"web": true, "clien_celular": true, "celular": true,
+		"clien_cp": true, "cp": true, "coordenadas": true,
+	}
+	got := map[string]bool{}
+	for _, f := range fields {
+		got[f] = true
+	}
+	for name := range want {
+		if !got[name] {
+			t.Fatalf("clientes debe proteger %s por defecto, got %v", name, fields)
+		}
 	}
 	if cfg.CloudOwnedFieldsFor("productos") != nil {
 		t.Fatalf("productos no debe tener cloud-owned flags por defecto")
@@ -41,6 +51,10 @@ func TestDefaultCloudOwnedFieldsProtegeClientesWeb(t *testing.T) {
 	pagina := cfg.CloudAuthoritativeFieldsFor("pedido_pagina")
 	if len(pagina) < 1 {
 		t.Fatal("pedido_pagina debe declarar columnas nube por defecto")
+	}
+	cliAuth := cfg.CloudAuthoritativeFieldsFor("clientes")
+	if len(cliAuth) < 1 {
+		t.Fatal("clientes debe declarar columnas nube autoritativas por defecto")
 	}
 }
 
@@ -85,5 +99,39 @@ func TestLoadSyncTablesConfigDefaultsAutoSyncForLegacyFile(t *testing.T) {
 	}
 	if cfg.AutoAuditIntervalHours != 6 {
 		t.Fatalf("AutoAuditIntervalHours=%d want 6", cfg.AutoAuditIntervalHours)
+	}
+}
+
+func TestLoadSyncTablesConfigStripsUTF8BOM(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("APPDATA", tempDir)
+
+	cfgDir := filepath.Join(tempDir, "sycronizafhir")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	payload := append([]byte{0xEF, 0xBB, 0xBF}, []byte(`{"enabled_tables":["clientes","productos","productos_depositos","pedidos","pedidos_d","rubro","subrubro"]}`)...)
+	if err := os.WriteFile(filepath.Join(cfgDir, "sync-tables.json"), payload, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := LoadSyncTablesConfig()
+	if err != nil {
+		t.Fatalf("LoadSyncTablesConfig con BOM debe parsear: %v", err)
+	}
+	if !cfg.IsEnabled("pedidos") {
+		t.Fatal("pedidos debe quedar habilitado tras strip BOM")
+	}
+}
+
+func TestStripUTF8BOM(t *testing.T) {
+	plain := []byte(`{"a":1}`)
+	if got := stripUTF8BOM(plain); string(got) != string(plain) {
+		t.Fatalf("sin BOM no debe cambiar, got %q", got)
+	}
+	with := append([]byte{0xEF, 0xBB, 0xBF}, plain...)
+	if got := stripUTF8BOM(with); string(got) != string(plain) {
+		t.Fatalf("con BOM debe quitar prefijo, got %q", got)
 	}
 }

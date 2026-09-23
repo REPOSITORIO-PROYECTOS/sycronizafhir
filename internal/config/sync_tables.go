@@ -27,7 +27,19 @@ type SyncTablesConfig struct {
 // (caso Riera 1358: stamps masivos de fecha_modificacion destildaban la tienda).
 func DefaultCloudOwnedFields() map[string][]string {
 	return map[string][]string{
-		"clientes": {"web"},
+		"clientes": {
+			"web",
+			"instagram",
+			"alias_mp",
+			"clien_telefono", "telefono",
+			"clien_celular", "celular",
+			"clien_domicilio", "domicilio",
+			"clien_localidad", "localidad",
+			"clien_email", "email",
+			"clien_cp", "cp",
+			"provi_id",
+			"coordenadas",
+		},
 	}
 }
 
@@ -37,6 +49,11 @@ func DefaultCloudAuthoritativeFields() map[string][]string {
 		"productos": {"prod_orden"},
 		"pedido_pagina": {
 			"email", "fecha", "mailed", "razonsocial", "cuit", "comentario",
+		},
+		"clientes": {
+			"coordenadas",
+			"clien_celular", "celular",
+			"clien_cp", "cp",
 		},
 	}
 }
@@ -87,6 +104,14 @@ func syncTablesConfigPath() (string, error) {
 	return filepath.Join(baseDir, "sycronizafhir", "sync-tables.json"), nil
 }
 
+// stripUTF8BOM quita EF BB BF si está al inicio (editores/PowerShell en Windows).
+func stripUTF8BOM(raw []byte) []byte {
+	if len(raw) >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF {
+		return raw[3:]
+	}
+	return raw
+}
+
 func LoadSyncTablesConfig() (SyncTablesConfig, error) {
 	defaults := DefaultSyncTablesConfig()
 	path, err := syncTablesConfigPath()
@@ -101,6 +126,9 @@ func LoadSyncTablesConfig() (SyncTablesConfig, error) {
 		}
 		return defaults, err
 	}
+	// PowerShell Set-Content / editores Windows suelen meter UTF-8 BOM; encoding/json
+	// falla con "invalid character '' looking for beginning of value" y tumba outbound.
+	raw = stripUTF8BOM(raw)
 
 	var cfg SyncTablesConfig
 	if err = json.Unmarshal(raw, &cfg); err != nil {

@@ -91,7 +91,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	inboundPedidosSeconds, err := readIntWithDefault("INBOUND_PEDIDOS_INTERVAL_SECONDS", 60)
+	// Picking PATCH K/V/E en Supabase es inmediato; este poll baja la letra al ERP.
+	// 15s: respuesta rápida en Gestiona sin websocket UPDATE (ruido + fallback igual).
+	inboundPedidosSeconds, err := readIntWithDefault("INBOUND_PEDIDOS_INTERVAL_SECONDS", 15)
 	if err != nil {
 		return Config{}, err
 	}

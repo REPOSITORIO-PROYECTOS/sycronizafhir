@@ -5,6 +5,51 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.22] - 2026-09-23
+
+### Corregido
+
+- **`sync-tables.json` con UTF-8 BOM**: `LoadSyncTablesConfig` ignora `EF BB BF`. Evita tumbar outbound con `invalid character '' looking for beginning of value` (incidente cola P 2026-09-23; PowerShell `Set-Content`).
+
+## [1.6.21] - 2026-09-22
+
+### Añadido
+
+- **Inbound clientes `coordenadas`**: baja lat,lng OSM desde Supabase → Mica/Gestiona en la misma columna `coordenadas` (tienda/picking ya escriben ahí).
+
+## [1.6.20] - 2026-09-16
+
+### Corregido
+
+- **Outbound `pedidos` por clave**: cada ciclo reenvía los últimos 20 `ped_id` (y sus líneas en `pedidos_d`) aunque el watermark de `fecha_modificacion` no los vea. Evita huecos tipo 902801–902805 en nube mientras Contabo espera.
+- **Timeout por tabla (90 s)** en upsert outbound: un upsert/red colgado ya no frena el ciclo entero (síntoma: `outbound.json` congelado >40 min).
+
+## [1.6.19] - 2026-09-16
+
+### Corregido
+
+- **Inbound `pedidos.bultos` Misan**: al bajar estado K/V/E desde Supabase también replica la columna `bultos` (y alias `bulto` / `nro_bulto`) cuando existe en Gestiona. Sin esto Ops escribía bultos en la nube y SERVIDOR no los aplicaba.
+
+## [1.6.18] - 2026-09-09
+
+### Cambiado
+
+- **Inbound `pedidos.estado` más rápido**: default `INBOUND_PEDIDOS_INTERVAL_SECONDS` de 60 → **15**.
+- **Wake desde Picking**: tabla Supabase `sync_inbound_wake` + poll ~5 s. Contabo INSERT tras PATCH K/V/E/P; sycron baja por `ped_id` sin depender solo de `fecha_modificacion`.
+- **Apply sin stamp**: P→K/V/E y K→V/E aplican aunque el stamp remoto no sea “newer” (causa de “esperé >60 s y no pasó”).
+
+## [1.6.17] - 2026-09-02
+
+### Corregido
+
+- **image_sync no salta talles de una misma foto**: la caché es por `prod_id` + archivo. Varios SKU que apuntan a `PE0789.jpg` (u otro JPG compartido) vuelven a subir cada `{prod_id}.jpg` a Storage; ya no queda el leftover del primer id.
+
+## [1.6.16] - 2026-09-01
+
+### Corregido
+
+- **`pedidos.estado` picking no se pisa**: el outbound ERP→Supabase ya no vuelve a P/C una cabecera que Picking dejó en K/V/E (casos 901747 P y 901789 C). El inbound también baja **P** (soltar armado). Gestiona **C** sigue ganando sobre un P de nube, no sobre un V de picking.
+
 ## [1.6.15] - 2026-09-01
 
 ### Corregido

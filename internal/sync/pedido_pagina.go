@@ -32,6 +32,18 @@ func isPedidoPaginaDetailTable(tableName string) bool {
 	return false
 }
 
+// Letras de pedido_pagina.estado que Gestiona puede mandar a Supabase.
+// N = nuevo (alta nube). S = comprometido / Traer. Cualquier otra se ignora
+// para no crear valores que Shops no entiende.
+var pedidoPaginaEstadosPermitidos = map[string]bool{
+	"N": true,
+	"S": true,
+}
+
+func pedidoPaginaEstadoPermitido(estado string) bool {
+	return pedidoPaginaEstadosPermitidos[estado]
+}
+
 // skipPedidoPaginaGenericOutbound: el upsert genérico no debe tocar cabeza ni
 // detalle. Cabeza: solo PATCH de estado (worker dedicado). Detalle: nube.
 func skipPedidoPaginaGenericOutbound(tableName string) bool {
@@ -67,7 +79,11 @@ func normalizePedidoPaginaEstado(raw interface{}) string {
 	if text == "" || text == "<NIL>" {
 		return ""
 	}
-	return text[:1]
+	letter := text[:1]
+	if !pedidoPaginaEstadoPermitido(letter) {
+		return ""
+	}
+	return letter
 }
 
 // restrictPedidoPaginaOutboundRows deja solo PK + estado. Defensa si un retry

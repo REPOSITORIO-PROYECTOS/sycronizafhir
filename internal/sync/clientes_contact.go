@@ -12,12 +12,16 @@ import (
 // `web` = flag alta tienda (S/N). `clien_web` = URL/contacto legacy (NO es el flag).
 var clientesInboundColumnPairs = [][2]string{
 	{"clien_telefono", "telefono"},
+	{"clien_celular", "celular"},
 	{"clien_domicilio", "domicilio"},
 	{"clien_localidad", "localidad"},
+	{"clien_cp", "cp"},
 	{"clien_email", "email"},
 	{"clien_cuit", "cuit"},
 	{"clien_web", "clien_web"},
 	{"web", "web"},
+	{"provi_id", "provi_id"},
+	{"coordenadas", "coordenadas"},
 }
 
 // Solo la columna char `web` gobierna el alta tienda; no mezclar con clien_web.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"sycronizafhir/internal/config"
@@ -14,15 +15,17 @@ import (
 
 const inboundPedidosEstadoStateKey = "inbound_pedidos_estado_last_run_utc"
 
-// PedidosInboundWorker baja estados K/V/E (y bultos) de Supabase → Mica cuando Picking opera.
+// PedidosInboundWorker baja estados P/K/V/E (y bultos) de Supabase → Mica cuando Picking opera.
 type PedidosInboundWorker struct {
 	localPG      *db.LocalPG
 	remotePG     *supabase.PGClient
 	queue        *db.QueueSQLite
 	sourceSchema string
 	pollInterval time.Duration
+	wakeInterval time.Duration
 	lastRun      time.Time
 	runtime      *monitor.Runtime
+	wakeMissing  bool
 }
 
 func NewPedidosInboundWorker(
@@ -32,12 +35,17 @@ func NewPedidosInboundWorker(
 	cfg config.Config,
 	runtime *monitor.Runtime,
 ) *PedidosInboundWorker {
+	wakeEvery := 5 * time.Second
+	if cfg.InboundPedidosInterval > 0 && cfg.InboundPedidosInterval < wakeEvery {
+		wakeEvery = cfg.InboundPedidosInterval
+	}
 	return &PedidosInboundWorker{
 		localPG:      localPG,
 		remotePG:     remotePG,
 		queue:        queue,
 		sourceSchema: cfg.SourceSchema,
 		pollInterval: cfg.InboundPedidosInterval,
+		wakeInterval: wakeEvery,
 		lastRun:      time.Now().Add(-24 * time.Hour),
 		runtime:      runtime,
 	}
@@ -51,6 +59,8 @@ func (w *PedidosInboundWorker) Run(ctx context.Context) {
 
 	ticker := time.NewTicker(w.pollInterval)
 	defer ticker.Stop()
+	wakeTicker := time.NewTicker(w.wakeInterval)
+	defer wakeTicker.Stop()
 
 	if err := w.runCycle(ctx); err != nil {
 		log.Printf("inbound pedidos initial cycle failed: %v", err)
@@ -60,6 +70,11 @@ func (w *PedidosInboundWorker) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-wakeTicker.C:
+			if err := w.processWakes(ctx); err != nil {
+				log.Printf("inbound pedidos wake failed: %v", err)
+				w.runtime.SetComponentStatus("inbound_pedidos", "error", err.Error())
+			}
 		case <-ticker.C:
 			if err := w.runCycle(ctx); err != nil {
 				log.Printf("inbound pedidos cycle failed: %v", err)
@@ -72,6 +87,10 @@ func (w *PedidosInboundWorker) Run(ctx context.Context) {
 }
 
 func (w *PedidosInboundWorker) runCycle(ctx context.Context) error {
+	if err := w.processWakes(ctx); err != nil {
+		return err
+	}
+
 	table, err := w.resolvePedidosTable(ctx)
 	if err != nil {
 		return err
@@ -98,7 +117,7 @@ func (w *PedidosInboundWorker) runCycle(ctx context.Context) error {
 			return applyErr
 		}
 		if applied > 0 {
-			w.runtime.AddLog(fmt.Sprintf("inbound pedidos: %d cabecera(s) actualizadas en Mica (K/V/E)", applied))
+			w.runtime.AddLog(fmt.Sprintf("inbound pedidos: %d cabecera(s) actualizadas en Mica (P/K/V/E)", applied))
 		} else {
 			w.runtime.AddLog(fmt.Sprintf("inbound pedidos: %d cambio(s) en nube sin patch local", len(remoteRows)))
 		}
@@ -109,6 +128,77 @@ func (w *PedidosInboundWorker) runCycle(ctx context.Context) error {
 	if err = w.persistCheckpoint(ctx, now); err != nil {
 		log.Printf("persist inbound pedidos checkpoint failed: %v", err)
 	}
+	return nil
+}
+
+// processWakes aplica estados ped_id señalados por Picking (tabla sync_inbound_wake).
+// No depende de fecha_modificacion: carga la fila por PK y aplica el patch.
+func (w *PedidosInboundWorker) processWakes(ctx context.Context) error {
+	if w.wakeMissing {
+		return nil
+	}
+	wakes, tableOK, err := w.remotePG.ListPendingInboundWakes(ctx, 100)
+	if err != nil {
+		return err
+	}
+	if !tableOK {
+		if !w.wakeMissing {
+			w.runtime.AddLog("inbound pedidos: sync_inbound_wake ausente en Supabase (wake desactivado)")
+			w.wakeMissing = true
+		}
+		return nil
+	}
+	if len(wakes) == 0 {
+		return nil
+	}
+
+	table, err := w.resolvePedidosTable(ctx)
+	if err != nil {
+		return err
+	}
+	if table.Name == "" {
+		return nil
+	}
+	meta, err := w.localPG.LoadTableModifiedAtMeta(ctx, w.sourceSchema, table.Name)
+	if err != nil {
+		return err
+	}
+
+	ids := make([]int64, 0, len(wakes))
+	pkBatch := make([]map[string]interface{}, 0, len(wakes))
+	pkCol := "ped_id"
+	if len(table.PrimaryKeys) > 0 {
+		pkCol = table.PrimaryKeys[0]
+	}
+	for _, wake := range wakes {
+		ids = append(ids, wake.ID)
+		pedID := strings.TrimSpace(wake.PedID)
+		if pedID == "" {
+			continue
+		}
+		pkBatch = append(pkBatch, map[string]interface{}{pkCol: pedID})
+	}
+
+	applied := 0
+	if len(pkBatch) > 0 {
+		remoteRows, loadErr := w.remotePG.LoadRowsByPrimaryKeys(ctx, "public", table.Name, table.PrimaryKeys, pkBatch)
+		if loadErr != nil {
+			return loadErr
+		}
+		n, applyErr := w.applyRemotePedidoRows(ctx, table, meta, remoteRows)
+		if applyErr != nil {
+			return applyErr
+		}
+		applied = n
+	}
+
+	if markErr := w.remotePG.MarkInboundWakesConsumed(ctx, ids); markErr != nil {
+		return markErr
+	}
+	w.runtime.AddLog(fmt.Sprintf(
+		"inbound pedidos wake: %d señal(es), %d cabecera(s) aplicadas",
+		len(wakes), applied,
+	))
 	return nil
 }
 

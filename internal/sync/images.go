@@ -149,7 +149,7 @@ func (r *ImageResolver) uploadLocalImage(ctx context.Context, prodID, imagePath 
 	}
 
 	fingerprint := fileFingerprint(content, info.ModTime(), info.Size())
-	cacheKey := imageCacheKeyPrefix + strings.ToLower(localPath)
+	cacheKey := imageCacheKey(prodID, localPath)
 	if cachedURL, ok := r.loadCachedURL(ctx, cacheKey, fingerprint); ok {
 		return cachedURL, nil
 	}
@@ -199,10 +199,22 @@ func (r *ImageResolver) saveCachedURL(ctx context.Context, cacheKey, fingerprint
 	return r.queue.SetStateValue(ctx, cacheKey, string(payload))
 }
 
-// IsLocalImageCached reports whether this local file was already uploaded
-// and the jpg on disk is still the same (mtime + size from Sys_Image\Fotos\Productos).
+// imageCacheKey is per prod_id + path. Families share one Sys_Image jpg
+// (PE0789.jpg → seven talles); a path-only key skipped siblings and left
+// stale {prod_id}.jpg in Storage.
+func imageCacheKey(prodID, localPath string) string {
+	pid := strings.ToLower(strings.TrimSpace(prodID))
+	path := strings.ToLower(localPath)
+	if pid == "" {
+		return imageCacheKeyPrefix + path
+	}
+	return imageCacheKeyPrefix + pid + ":" + path
+}
+
+// IsLocalImageCached reports whether this prod_id already uploaded this local
+// file and the jpg on disk is still the same (mtime + size).
 // A newer overwrite must return false so the auto cycle re-uploads.
-func (r *ImageResolver) IsLocalImageCached(ctx context.Context, imagePath string) bool {
+func (r *ImageResolver) IsLocalImageCached(ctx context.Context, prodID, imagePath string) bool {
 	if r == nil || r.queue == nil {
 		return false
 	}
@@ -214,7 +226,7 @@ func (r *ImageResolver) IsLocalImageCached(ctx context.Context, imagePath string
 	if statErr != nil || info.IsDir() {
 		return false
 	}
-	cacheKey := imageCacheKeyPrefix + strings.ToLower(localPath)
+	cacheKey := imageCacheKey(prodID, localPath)
 	raw, exists, err := r.queue.GetStateValue(ctx, cacheKey)
 	if err != nil || !exists {
 		return false
@@ -407,7 +419,7 @@ func (w *ImageSyncWorker) runCycle(ctx context.Context, force bool) error {
 				goto finishCycle
 			}
 
-			if !force && w.resolver != nil && w.resolver.IsLocalImageCached(ctx, candidate.ProdImagen) {
+			if !force && w.resolver != nil && w.resolver.IsLocalImageCached(ctx, candidate.ProdID, candidate.ProdImagen) {
 				stats.Skipped++
 				continue
 			}
