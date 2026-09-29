@@ -143,6 +143,23 @@ func (w *PedidoPaginaInboundWorker) runCycle(ctx context.Context) error {
 			continue
 		}
 
+		// SERVIDOR Misan: pedido_pagina.clien_id — si la nube viene vacía,
+		// hidratar desde clientes locales por CUIT (Gestiona).
+		filledClien, hydrateErr := hydratePedidoPaginaHeadClienID(head, func(cuitDigits string) (int16, bool, error) {
+			return w.localPG.LookupClienteIDByCuit(ctx, w.sourceSchema, cuitDigits)
+		})
+		if hydrateErr != nil {
+			return hydrateErr
+		}
+		if filledClien {
+			clienID, _ := pedidoPaginaClienIDValue(head["clien_id"])
+			w.runtime.AddLog(fmt.Sprintf(
+				"inbound pedido_pagina: id=%d clien_id=%d (por CUIT)",
+				pedidoID,
+				clienID,
+			))
+		}
+
 		if err = w.localPG.UpsertPedidoPaginaHead(ctx, w.sourceSchema, head); err != nil {
 			return err
 		}

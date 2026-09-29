@@ -5,6 +5,12 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.23] - 2026-09-29
+
+### Añadido
+
+- **Inbound `pedido_pagina.clien_id`**: al hidratar cabeza SB→Misan, si `clien_id` viene vacío se resuelve en `clientes` locales por CUIT (`LookupClienteIDByCuit`). No pisa un id ya presente en nube.
+
 ## [1.6.22] - 2026-09-23
 
 ### Corregido
