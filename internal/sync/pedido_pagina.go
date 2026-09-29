@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -84,6 +85,107 @@ func normalizePedidoPaginaEstado(raw interface{}) string {
 		return ""
 	}
 	return letter
+}
+
+// pedidoPaginaClienIDValue lee clien_id de la cabeza (nube o local).
+// Cero / vacío / nil → ausente (hay que hidratar por CUIT en SERVIDOR).
+func pedidoPaginaClienIDValue(raw interface{}) (int16, bool) {
+	if raw == nil {
+		return 0, false
+	}
+	switch typed := raw.(type) {
+	case int16:
+		if typed == 0 {
+			return 0, false
+		}
+		return typed, true
+	case int32:
+		if typed == 0 {
+			return 0, false
+		}
+		return int16(typed), true
+	case int:
+		if typed == 0 {
+			return 0, false
+		}
+		return int16(typed), true
+	case int64:
+		if typed == 0 {
+			return 0, false
+		}
+		return int16(typed), true
+	case float64:
+		if typed == 0 {
+			return 0, false
+		}
+		return int16(typed), true
+	case string:
+		text := strings.TrimSpace(typed)
+		if text == "" || strings.EqualFold(text, "<nil>") {
+			return 0, false
+		}
+		n, err := strconv.ParseInt(text, 10, 16)
+		if err != nil || n == 0 {
+			return 0, false
+		}
+		return int16(n), true
+	case []byte:
+		return pedidoPaginaClienIDValue(string(typed))
+	default:
+		text := strings.TrimSpace(fmt.Sprint(raw))
+		if text == "" || strings.EqualFold(text, "<nil>") {
+			return 0, false
+		}
+		n, err := strconv.ParseInt(text, 10, 16)
+		if err != nil || n == 0 {
+			return 0, false
+		}
+		return int16(n), true
+	}
+}
+
+func digitsOnlyCuit(raw interface{}) string {
+	if raw == nil {
+		return ""
+	}
+	text := strings.TrimSpace(fmt.Sprint(raw))
+	if text == "" || strings.EqualFold(text, "<nil>") {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range text {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// hydratePedidoPaginaHeadClienID: si la nube no trae clien_id, lo resuelve en
+// clientes locales (Gestiona) por CUIT. No pisa un clien_id ya presente.
+func hydratePedidoPaginaHeadClienID(
+	head map[string]interface{},
+	lookup func(cuitDigits string) (int16, bool, error),
+) (filled bool, err error) {
+	if head == nil || lookup == nil {
+		return false, nil
+	}
+	if _, ok := pedidoPaginaClienIDValue(head["clien_id"]); ok {
+		return false, nil
+	}
+	cuit := digitsOnlyCuit(head["cuit"])
+	if cuit == "" {
+		return false, nil
+	}
+	id, found, lookupErr := lookup(cuit)
+	if lookupErr != nil {
+		return false, lookupErr
+	}
+	if !found || id == 0 {
+		return false, nil
+	}
+	head["clien_id"] = id
+	return true, nil
 }
 
 // restrictPedidoPaginaOutboundRows deja solo PK + estado. Defensa si un retry

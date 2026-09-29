@@ -133,3 +133,92 @@ func TestNormalizePedidoPaginaEstadoSoloNS(t *testing.T) {
 		t.Fatalf("P no es estado de pagina, got %q", got)
 	}
 }
+
+func TestPedidoPaginaClienIDValue(t *testing.T) {
+	if _, ok := pedidoPaginaClienIDValue(nil); ok {
+		t.Fatal("nil debe ausente")
+	}
+	if _, ok := pedidoPaginaClienIDValue(int16(0)); ok {
+		t.Fatal("0 debe ausente")
+	}
+	if _, ok := pedidoPaginaClienIDValue(""); ok {
+		t.Fatal("string vacío debe ausente")
+	}
+	got, ok := pedidoPaginaClienIDValue(int16(142))
+	if !ok || got != 142 {
+		t.Fatalf("int16: got=%d ok=%v", got, ok)
+	}
+	got, ok = pedidoPaginaClienIDValue(float64(1358))
+	if !ok || got != 1358 {
+		t.Fatalf("float64: got=%d ok=%v", got, ok)
+	}
+	got, ok = pedidoPaginaClienIDValue("302")
+	if !ok || got != 302 {
+		t.Fatalf("string: got=%d ok=%v", got, ok)
+	}
+}
+
+func TestDigitsOnlyCuit(t *testing.T) {
+	if got := digitsOnlyCuit("20-12345678-9"); got != "20123456789" {
+		t.Fatalf("got %q", got)
+	}
+	if got := digitsOnlyCuit(nil); got != "" {
+		t.Fatalf("nil: %q", got)
+	}
+}
+
+func TestHydratePedidoPaginaHeadClienID(t *testing.T) {
+	t.Run("ya presente no pisa", func(t *testing.T) {
+		head := map[string]interface{}{"clien_id": int16(10), "cuit": "20123456789"}
+		filled, err := hydratePedidoPaginaHeadClienID(head, func(string) (int16, bool, error) {
+			t.Fatal("lookup no debe llamarse")
+			return 0, false, nil
+		})
+		if err != nil || filled {
+			t.Fatalf("filled=%v err=%v", filled, err)
+		}
+		if head["clien_id"].(int16) != 10 {
+			t.Fatalf("clien_id=%v", head["clien_id"])
+		}
+	})
+
+	t.Run("resuelve por CUIT", func(t *testing.T) {
+		head := map[string]interface{}{"cuit": "20-36253099-8", "estado": "N"}
+		filled, err := hydratePedidoPaginaHeadClienID(head, func(cuit string) (int16, bool, error) {
+			if cuit != "20362530998" {
+				t.Fatalf("cuit digits=%q", cuit)
+			}
+			return 999, true, nil
+		})
+		if err != nil || !filled {
+			t.Fatalf("filled=%v err=%v", filled, err)
+		}
+		if head["clien_id"].(int16) != 999 {
+			t.Fatalf("clien_id=%v", head["clien_id"])
+		}
+	})
+
+	t.Run("sin match deja null", func(t *testing.T) {
+		head := map[string]interface{}{"cuit": "20111111112"}
+		filled, err := hydratePedidoPaginaHeadClienID(head, func(string) (int16, bool, error) {
+			return 0, false, nil
+		})
+		if err != nil || filled {
+			t.Fatalf("filled=%v err=%v", filled, err)
+		}
+		if _, ok := head["clien_id"]; ok {
+			t.Fatalf("no debe setear clien_id: %v", head["clien_id"])
+		}
+	})
+
+	t.Run("sin CUIT no lookup", func(t *testing.T) {
+		head := map[string]interface{}{"estado": "N"}
+		filled, err := hydratePedidoPaginaHeadClienID(head, func(string) (int16, bool, error) {
+			t.Fatal("lookup no debe llamarse")
+			return 0, false, nil
+		})
+		if err != nil || filled {
+			t.Fatalf("filled=%v err=%v", filled, err)
+		}
+	})
+}
