@@ -31,6 +31,7 @@ func TestDefaultCloudOwnedFieldsProtegeClientesWeb(t *testing.T) {
 	want := map[string]bool{
 		"web": true, "clien_celular": true, "celular": true,
 		"clien_cp": true, "cp": true, "coordenadas": true,
+		"contacto": true, "clien_nombre": true, "instagram": true,
 	}
 	got := map[string]bool{}
 	for _, f := range fields {

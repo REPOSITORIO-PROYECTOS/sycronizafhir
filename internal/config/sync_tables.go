@@ -31,6 +31,8 @@ func DefaultCloudOwnedFields() map[string][]string {
 			"web",
 			"instagram",
 			"alias_mp",
+			"contacto",
+			"clien_nombre", "nombre",
 			"clien_telefono", "telefono",
 			"clien_celular", "celular",
 			"clien_domicilio", "domicilio",
@@ -52,8 +54,15 @@ func DefaultCloudAuthoritativeFields() map[string][]string {
 		},
 		"clientes": {
 			"coordenadas",
+			"contacto",
+			"clien_nombre", "nombre",
+			"instagram",
 			"clien_celular", "celular",
 			"clien_cp", "cp",
+			"clien_domicilio", "domicilio",
+			"clien_localidad", "localidad",
+			"clien_telefono", "telefono",
+			"provi_id",
 		},
 	}
 }

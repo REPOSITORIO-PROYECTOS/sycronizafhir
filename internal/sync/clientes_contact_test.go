@@ -100,6 +100,35 @@ func TestMergeClienteInboundPatchRemoteNewerPisaLocal(t *testing.T) {
 	}
 }
 
+func TestMergeClienteInboundPerfilWebNombreContactoInstagram(t *testing.T) {
+	meta := db.TableModifiedAtMeta{FechaIsDate: true, HasHoraModificacion: true}
+	local := map[string]interface{}{
+		"clien_nombre":       "Viejo Nombre",
+		"contacto":           "Vieja Fantasia",
+		"instagram":          "@viejo",
+		"fecha_modificacion": "2026-07-01",
+		"hora_modificacion":  "10:00:00",
+	}
+	remote := map[string]interface{}{
+		"clien_nombre":       "Juan Perez",
+		"contacto":           "Pet Shop",
+		"instagram":          "@petshop",
+		"fecha_modificacion": "2026-09-30",
+		"hora_modificacion":  "12:00:00",
+	}
+
+	patch := mergeClienteInboundPatch(local, remote, meta)
+	if patch["clien_nombre"] != "Juan Perez" {
+		t.Fatalf("clien_nombre: got %v", patch["clien_nombre"])
+	}
+	if patch["contacto"] != "Pet Shop" {
+		t.Fatalf("contacto: got %v", patch["contacto"])
+	}
+	if patch["instagram"] != "@petshop" {
+		t.Fatalf("instagram: got %v", patch["instagram"])
+	}
+}
+
 func TestMergeClienteInboundNoConfundeClienWebConFlag(t *testing.T) {
 	meta := db.TableModifiedAtMeta{FechaIsDate: true, HasHoraModificacion: true}
 	local := map[string]interface{}{

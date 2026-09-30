@@ -5,6 +5,12 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.24] - 2026-09-30
+
+### Corregido
+
+- **Perfil tienda → Mica**: inbound de `clientes` ahora baja `clien_nombre`/`contacto`/`instagram` (antes solo teléfono/domicilio/CP/…). Defaults `cloud_owned` / `cloud_authoritative` protegen esos campos en outbound para que el ERP no pise la nube.
+
 ## [1.6.23] - 2026-09-29
 
 ### Añadido

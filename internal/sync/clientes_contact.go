@@ -10,7 +10,12 @@ import (
 
 // Columnas editables desde Picking/tienda en Supabase → Mica.
 // `web` = flag alta tienda (S/N). `clien_web` = URL/contacto legacy (NO es el flag).
+// Incluye nombre/fantasía/instagram del perfil web (sin esto el PATCH de tienda
+// nunca llega al ERP aunque haya stamp de fecha_modificacion).
 var clientesInboundColumnPairs = [][2]string{
+	{"clien_nombre", "nombre"},
+	{"contacto", "contacto"},
+	{"instagram", "instagram"},
 	{"clien_telefono", "telefono"},
 	{"clien_celular", "celular"},
 	{"clien_domicilio", "domicilio"},
