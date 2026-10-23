@@ -40,6 +40,7 @@ type Config struct {
 	InboundClientesInterval     time.Duration
 	InboundPedidosInterval      time.Duration
 	InboundPedidoPaginaInterval time.Duration
+	InboundPendientesInterval   time.Duration
 	ImageSyncEnabled            bool
 	ImageSyncInterval      time.Duration
 	ImageSyncAutoBatch     int
@@ -91,6 +92,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	inboundPendientesSeconds, err := readIntWithDefault("INBOUND_PENDIENTES_INTERVAL_SECONDS", 120)
+	if err != nil {
+		return Config{}, err
+	}
+
 	// Picking PATCH K/V/E en Supabase es inmediato; este poll baja la letra al ERP.
 	// 15s: respuesta rápida en Gestiona sin websocket UPDATE (ruido + fallback igual).
 	inboundPedidosSeconds, err := readIntWithDefault("INBOUND_PEDIDOS_INTERVAL_SECONDS", 15)
@@ -131,6 +137,7 @@ func Load() (Config, error) {
 		InboundClientesInterval:     time.Duration(inboundClientesSeconds) * time.Second,
 		InboundPedidosInterval:      time.Duration(inboundPedidosSeconds) * time.Second,
 		InboundPedidoPaginaInterval: time.Duration(inboundPedidoPaginaSeconds) * time.Second,
+		InboundPendientesInterval:   time.Duration(inboundPendientesSeconds) * time.Second,
 		ImageSyncEnabled:            readBoolWithDefault("IMAGE_SYNC_ENABLED", true),
 		ImageSyncInterval:        time.Duration(imageSyncSeconds) * time.Second,
 		ImageSyncAutoBatch:       imageSyncAutoBatch,

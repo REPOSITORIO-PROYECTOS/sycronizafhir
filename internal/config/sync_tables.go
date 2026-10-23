@@ -55,6 +55,7 @@ func DefaultCloudAuthoritativeFields() map[string][]string {
 			"clien_celular", "celular",
 			"clien_cp", "cp",
 		},
+		"pendientes": {"cantidad"},
 	}
 }
 

@@ -56,6 +56,10 @@ func TestDefaultCloudOwnedFieldsProtegeClientesWeb(t *testing.T) {
 	if len(cliAuth) < 1 {
 		t.Fatal("clientes debe declarar columnas nube autoritativas por defecto")
 	}
+	pendAuth := cfg.CloudAuthoritativeFieldsFor("pendientes")
+	if len(pendAuth) != 1 || pendAuth[0] != "cantidad" {
+		t.Fatalf("pendientes authoritative want [cantidad], got %v", pendAuth)
+	}
 }
 
 func TestNormalizeCloudOwnedFieldsDropVacios(t *testing.T) {

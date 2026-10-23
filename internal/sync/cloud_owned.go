@@ -83,8 +83,8 @@ func cloudValuesEqual(a, b interface{}) bool {
 	return strings.TrimSpace(fmt.Sprintf("%v", a)) == strings.TrimSpace(fmt.Sprintf("%v", b))
 }
 
-// preserveCloudAuthoritativeFields copia el valor remoto (si no está vacío)
-// sobre el local cuando difieren. Sirve para prod_orden y similares.
+// preserveCloudAuthoritativeFields copia el valor remoto (incluye 0 numérico)
+// sobre el local cuando difieren. Sirve para prod_orden y pendientes.cantidad.
 func preserveCloudAuthoritativeFields(
 	localRows []map[string]interface{},
 	remoteRows []map[string]interface{},
@@ -107,7 +107,7 @@ func preserveCloudAuthoritativeFields(
 		}
 		for _, column := range fields {
 			remoteValue, hasRemote := remote[column]
-			if !hasRemote || !cloudFieldEnabled(remoteValue) {
+			if !hasRemote || isBlankValue(remoteValue) {
 				continue
 			}
 			localValue, hasLocal := local[column]
