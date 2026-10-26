@@ -80,6 +80,69 @@ func TestNormalizeCloudOwnedFieldsDropVacios(t *testing.T) {
 	}
 }
 
+func TestLoadSyncTablesConfigProtegePendientesCantidadEnJSONViejo(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("APPDATA", tempDir)
+
+	cfgDir := filepath.Join(tempDir, "sycronizafhir")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	// Como SERVIDOR: ya hay cloud_authoritative_fields, pero sin pendientes.
+	payload := []byte(`{
+		"enabled_tables": ["pendientes", "productos"],
+		"cloud_authoritative_fields": {
+			"productos": ["prod_orden"]
+		}
+	}`)
+	if err := os.WriteFile(filepath.Join(cfgDir, "sync-tables.json"), payload, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := LoadSyncTablesConfig()
+	if err != nil {
+		t.Fatalf("LoadSyncTablesConfig: %v", err)
+	}
+	got := cfg.CloudAuthoritativeFieldsFor("pendientes")
+	if len(got) != 1 || got[0] != "cantidad" {
+		t.Fatalf("pendientes authoritative want [cantidad] para que el ERP no pise la tienda, got %v", got)
+	}
+	prod := cfg.CloudAuthoritativeFieldsFor("productos")
+	if len(prod) != 1 || prod[0] != "prod_orden" {
+		t.Fatalf("productos no debe perder prod_orden, got %v", prod)
+	}
+}
+
+func TestLoadSyncTablesConfigUnePendientesCantidadSiTablaVacia(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("APPDATA", tempDir)
+
+	cfgDir := filepath.Join(tempDir, "sycronizafhir")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	payload := []byte(`{
+		"enabled_tables": ["pendientes"],
+		"cloud_authoritative_fields": {
+			"pendientes": []
+		}
+	}`)
+	if err := os.WriteFile(filepath.Join(cfgDir, "sync-tables.json"), payload, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := LoadSyncTablesConfig()
+	if err != nil {
+		t.Fatalf("LoadSyncTablesConfig: %v", err)
+	}
+	got := cfg.CloudAuthoritativeFieldsFor("pendientes")
+	if len(got) != 1 || got[0] != "cantidad" {
+		t.Fatalf("pendientes:[] debe heredar cantidad, got %v", got)
+	}
+}
+
 func TestLoadSyncTablesConfigDefaultsAutoSyncForLegacyFile(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("APPDATA", tempDir)
