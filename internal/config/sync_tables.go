@@ -55,6 +55,7 @@ func DefaultCloudAuthoritativeFields() map[string][]string {
 			"clien_celular", "celular",
 			"clien_cp", "cp",
 		},
+		"pendientes": {"cantidad"},
 	}
 }
 
@@ -171,11 +172,10 @@ func LoadSyncTablesConfig() (SyncTablesConfig, error) {
 	if cfg.CloudAuthoritativeFields == nil {
 		cfg.CloudAuthoritativeFields = defaults.CloudAuthoritativeFields
 	} else {
-		for table, fields := range defaults.CloudAuthoritativeFields {
-			if _, exists := cfg.CloudAuthoritativeFields[table]; !exists {
-				cfg.CloudAuthoritativeFields[table] = fields
-			}
-		}
+		cfg.CloudAuthoritativeFields = mergeDefaultFieldMap(
+			cfg.CloudAuthoritativeFields,
+			defaults.CloudAuthoritativeFields,
+		)
 	}
 
 	return cfg, nil
@@ -260,6 +260,32 @@ func normalizeTableNames(values []string) []string {
 		result = append(result, name)
 	}
 	return result
+}
+
+// mergeDefaultFieldMap une columnas default en tablas ya presentes (incluye slice vacío).
+func mergeDefaultFieldMap(existing, defaults map[string][]string) map[string][]string {
+	if existing == nil {
+		return defaults
+	}
+	for table, defFields := range defaults {
+		current := existing[table]
+		seen := map[string]bool{}
+		for _, field := range current {
+			seen[strings.TrimSpace(field)] = true
+		}
+		for _, field := range defFields {
+			name := strings.TrimSpace(field)
+			if name == "" || seen[name] {
+				continue
+			}
+			current = append(current, name)
+			seen[name] = true
+		}
+		if len(current) > 0 {
+			existing[table] = current
+		}
+	}
+	return existing
 }
 
 func normalizeCloudOwnedFields(values map[string][]string) map[string][]string {

@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS public.pedido_pagina (
   estado character(1) DEFAULT 'N',
   comentario character varying(500),
   clien_id smallint,
+  sucursal_id integer,
   CONSTRAINT pk_pedido_pagina PRIMARY KEY (pedido_id)
 );
 

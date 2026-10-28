@@ -658,6 +658,46 @@ func (db *LocalPG) PatchRowColumns(
 	return tag.RowsAffected() > 0, nil
 }
 
+func (db *LocalPG) DeleteRowByPrimaryKeys(
+	ctx context.Context,
+	schemaName, tableName string,
+	pkColumns []string,
+	pkRow map[string]interface{},
+) (bool, error) {
+	if len(pkColumns) == 0 || len(pkRow) == 0 {
+		return false, nil
+	}
+	if !safeIdentifierPattern.MatchString(schemaName) || !safeIdentifierPattern.MatchString(tableName) {
+		return false, fmt.Errorf("invalid table identifier %s.%s", schemaName, tableName)
+	}
+
+	whereParts := make([]string, 0, len(pkColumns))
+	values := make([]interface{}, 0, len(pkColumns))
+	for index, column := range pkColumns {
+		if !safeIdentifierPattern.MatchString(column) {
+			return false, fmt.Errorf("invalid pk column: %s", column)
+		}
+		value, ok := pkRow[column]
+		if !ok || value == nil {
+			return false, fmt.Errorf("missing pk %s", column)
+		}
+		whereParts = append(whereParts, fmt.Sprintf("%s = $%d", column, index+1))
+		values = append(values, value)
+	}
+
+	query := fmt.Sprintf(
+		`DELETE FROM %s.%s WHERE %s`,
+		schemaName,
+		tableName,
+		strings.Join(whereParts, " AND "),
+	)
+	tag, err := db.pool.Exec(ctx, query, values...)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 func (db *LocalPG) readPrimaryKeys(ctx context.Context, schemaName, tableName string) ([]string, error) {
 	const query = `
 		SELECT kcu.column_name

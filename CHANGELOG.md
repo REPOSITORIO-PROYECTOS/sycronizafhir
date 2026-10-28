@@ -5,6 +5,13 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.24] - 2026-10-23
+
+### Añadido
+
+- **Inbound `pendientes`**: baja cantidad (y baja si cantidad ≤ 0) desde Supabase → Mica. La tienda escribe la réplica; Gestiona toma el cambio en el ciclo inbound.
+- **`cantidad` autoritativa en nube** para `pendientes`: el outbound no pisa un cambio de tienda (incluye cantidad 0).
+
 ## [1.6.23] - 2026-09-29
 
 ### Añadido
