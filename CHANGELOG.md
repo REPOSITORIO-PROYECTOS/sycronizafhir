@@ -5,6 +5,13 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.25] - 2026-11-03
+
+### Corregido
+
+- **Inbound `pendientes` no bajaba cambios de la tienda a Mica**: el filtro comparaba `fecha_modificacion`/`hora_modificacion` (hora de Argentina) contra un checkpoint en UTC, así que cada cambio parecía 3 h más viejo y se salteaba. Ahora el checkpoint se pasa a hora de Argentina antes de comparar (`LoadUpdatedRowsLocalClock`), con 10 min de margen; re-aplicar una fila es idempotente.
+- **Sello de `fecha_modificacion` en patches locales** (`PatchRowColumns`): se graba en hora de Argentina en vez de UTC, para que un cambio posterior de la tienda no quede "más viejo" que el patch.
+
 ## [1.6.24] - 2026-10-23
 
 ### Añadido
