@@ -131,3 +131,72 @@ func TestMergePendienteInboundReaplicarEsIdempotente(t *testing.T) {
 		t.Fatalf("misma cantidad no debe generar cambios: %+v", got)
 	}
 }
+
+func TestMergePendienteInboundMismoSegundoConMsEnERPPisa(t *testing.T) {
+	meta := db.TableModifiedAtMeta{FechaIsDate: true, HasHoraModificacion: true}
+	local := map[string]interface{}{
+		"cantidad":           14.0,
+		"fecha_modificacion": "2026-10-29",
+		"hora_modificacion":  "13:48:29.847",
+	}
+	remote := map[string]interface{}{
+		"cantidad":           10.0,
+		"fecha_modificacion": "2026-10-29",
+		"hora_modificacion":  "13:48:29",
+	}
+	got := mergePendienteInbound(local, remote, meta)
+	if got.Delete || got.Patch["cantidad"] != 10.0 {
+		t.Fatalf("mismo segundo con cantidad distinta debe parchear 10: %+v", got)
+	}
+}
+
+func TestMergePendienteInboundMismoSegundoCeroBorra(t *testing.T) {
+	meta := db.TableModifiedAtMeta{FechaIsDate: true, HasHoraModificacion: true}
+	local := map[string]interface{}{
+		"cantidad":           8.0,
+		"fecha_modificacion": "2026-10-29",
+		"hora_modificacion":  "13:48:29.847",
+	}
+	remote := map[string]interface{}{
+		"cantidad":           0.0,
+		"fecha_modificacion": "2026-10-29",
+		"hora_modificacion":  "13:48:29",
+	}
+	if got := mergePendienteInbound(local, remote, meta); !got.Delete {
+		t.Fatalf("mismo segundo con cantidad 0 debe borrar: %+v", got)
+	}
+}
+
+func TestMergePendienteInboundMismoSegundoMismaCantidadIdempotente(t *testing.T) {
+	meta := db.TableModifiedAtMeta{FechaIsDate: true, HasHoraModificacion: true}
+	local := map[string]interface{}{
+		"cantidad":           10.0,
+		"fecha_modificacion": "2026-10-29",
+		"hora_modificacion":  "13:48:29.847",
+	}
+	remote := map[string]interface{}{
+		"cantidad":           10.0,
+		"fecha_modificacion": "2026-10-29",
+		"hora_modificacion":  "13:48:29",
+	}
+	if got := mergePendienteInbound(local, remote, meta); got.Delete || len(got.Patch) != 0 {
+		t.Fatalf("misma cantidad no debe tocar nada: %+v", got)
+	}
+}
+
+func TestMergePendienteInboundERPUnSegundoDespuesNoPisa(t *testing.T) {
+	meta := db.TableModifiedAtMeta{FechaIsDate: true, HasHoraModificacion: true}
+	local := map[string]interface{}{
+		"cantidad":           14.0,
+		"fecha_modificacion": "2026-10-29",
+		"hora_modificacion":  "13:48:30.001",
+	}
+	remote := map[string]interface{}{
+		"cantidad":           10.0,
+		"fecha_modificacion": "2026-10-29",
+		"hora_modificacion":  "13:48:29",
+	}
+	if got := mergePendienteInbound(local, remote, meta); got.Delete || len(got.Patch) != 0 {
+		t.Fatalf("ERP un segundo más nueva no debe ceder: %+v", got)
+	}
+}

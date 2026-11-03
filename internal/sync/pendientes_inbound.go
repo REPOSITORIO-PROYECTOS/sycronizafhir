@@ -34,7 +34,10 @@ func mergePendienteInbound(
 ) pendienteInboundDecision {
 	remoteAt, remoteOK := db.RowModifiedAt(remoteRow, meta)
 	localAt, localOK := db.RowModifiedAt(localRow, meta)
-	remoteNewer := remoteOK && (!localOK || remoteAt.After(localAt))
+	// Supabase guarda hora_modificacion sin milisegundos y el ERP con ms:
+	// comparamos al segundo y, en el mismo segundo, gana Supabase (>=).
+	// Es idempotente: si la cantidad ya coincide no se parchea nada.
+	remoteNewer := remoteOK && (!localOK || !remoteAt.Truncate(time.Second).Before(localAt.Truncate(time.Second)))
 	if !remoteNewer {
 		return pendienteInboundDecision{}
 	}
