@@ -5,6 +5,12 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.25] - 2026-11-03
+
+### Corregido
+
+- **Inbound `pendientes`**: el checkpoint (UTC) se comparaba contra `fecha/hora_modificacion` escritas en hora argentina, así que los cambios de la tienda parecían 3 h viejos y no bajaban a Mica. Ahora la ventana se arma en reloj de `America/Argentina/Buenos_Aires` (tzdata embebida, fallback UTC-3), con 5 min de solape y checkpoint tomado al inicio del ciclo.
+
 ## [1.6.24] - 2026-10-23
 
 ### Añadido

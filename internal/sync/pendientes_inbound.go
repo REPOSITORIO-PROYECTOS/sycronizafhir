@@ -16,6 +16,16 @@ import (
 
 const inboundPendientesStateKey = "inbound_pendientes_last_run_utc"
 
+// pendientesInboundOverlap re-lee unos minutos antes del checkpoint para no
+// perder cambios en el borde del ciclo. Reaplicar la misma cantidad es inocuo.
+const pendientesInboundOverlap = 5 * time.Minute
+
+// pendientesInboundSince traduce el checkpoint (instante real, UTC) al reloj de
+// pared argentino en que la tienda escribe fecha/hora_modificacion.
+func pendientesInboundSince(lastRun time.Time) time.Time {
+	return db.ToArgentinaWallClock(lastRun.Add(-pendientesInboundOverlap))
+}
+
 // pendienteInboundDecision: patch de cantidad o baja en Mica.
 type pendienteInboundDecision struct {
 	Delete bool
@@ -156,6 +166,7 @@ func (w *PendientesInboundWorker) Run(ctx context.Context) {
 }
 
 func (w *PendientesInboundWorker) runCycle(ctx context.Context) error {
+	cycleStart := time.Now().UTC()
 	table, err := w.resolvePendientesTable(ctx)
 	if err != nil {
 		return err
@@ -165,7 +176,7 @@ func (w *PendientesInboundWorker) runCycle(ctx context.Context) error {
 		return nil
 	}
 
-	remoteRows, err := w.remotePG.LoadUpdatedRows(ctx, "public", table.Name, w.lastRun)
+	remoteRows, err := w.remotePG.LoadUpdatedRows(ctx, "public", table.Name, pendientesInboundSince(w.lastRun))
 	if err != nil {
 		return err
 	}
@@ -183,7 +194,8 @@ func (w *PendientesInboundWorker) runCycle(ctx context.Context) error {
 		}
 	}
 
-	now := time.Now().UTC()
+	// Se toma el instante ANTES de leer para no perder cambios hechos durante el ciclo.
+	now := cycleStart
 	w.lastRun = now
 	if err = w.persistCheckpoint(ctx, now); err != nil {
 		log.Printf("persist inbound pendientes checkpoint failed: %v", err)

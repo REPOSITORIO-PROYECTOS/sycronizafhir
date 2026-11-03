@@ -2,6 +2,7 @@ package sync
 
 import (
 	"testing"
+	"time"
 
 	"sycronizafhir/internal/db"
 )
@@ -111,5 +112,41 @@ func TestPreserveCloudAuthoritativeFieldsCantidadCero(t *testing.T) {
 	}
 	if !cloudValuesEqual(local[1]["cantidad"], 5.0) {
 		t.Fatalf("B debe quedar 5, got %v", local[1]["cantidad"])
+	}
+}
+
+func TestPendientesInboundSinceUsesArgentinaWallClock(t *testing.T) {
+	// 18:00 UTC = 15:00 ART; con 5 min de solape → 14:55 reloj argentino.
+	lastRun := time.Date(2026, 11, 3, 18, 0, 0, 0, time.UTC)
+	got := pendientesInboundSince(lastRun)
+	want := time.Date(2026, 11, 3, 14, 55, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Fatalf("since = %v, want %v", got, want)
+	}
+}
+
+func TestPendientesInboundSinceIncludesRecentTiendaChange(t *testing.T) {
+	// La tienda modificó a las 15:01 ART; el ciclo anterior corrió 15:00 ART (18:00 UTC).
+	lastRun := time.Date(2026, 11, 3, 18, 0, 0, 0, time.UTC)
+	meta := db.TableModifiedAtMeta{HasHoraModificacion: true, FechaIsDate: true}
+	row := map[string]interface{}{"fecha_modificacion": "2026-11-03", "hora_modificacion": "15:01:00"}
+	modAt, ok := db.RowModifiedAt(row, meta)
+	if !ok {
+		t.Fatal("RowModifiedAt failed")
+	}
+	if !modAt.After(pendientesInboundSince(lastRun)) {
+		t.Fatalf("cambio %v quedó fuera de la ventana %v", modAt, pendientesInboundSince(lastRun))
+	}
+	// Con el bug viejo (comparar contra UTC) quedaba afuera:
+	if modAt.After(lastRun) {
+		t.Fatal("el test ya no reproduce el bug original")
+	}
+}
+
+func TestPendientesInboundSinceAroundMidnight(t *testing.T) {
+	// 01:00 UTC del día 4 = 22:00 ART del día 3.
+	got := pendientesInboundSince(time.Date(2026, 11, 4, 1, 5, 0, 0, time.UTC))
+	if got.Day() != 3 || got.Hour() != 22 || got.Minute() != 0 {
+		t.Fatalf("since = %v, want 2026-11-03 22:00", got)
 	}
 }
