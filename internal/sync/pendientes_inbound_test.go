@@ -113,3 +113,21 @@ func TestPreserveCloudAuthoritativeFieldsCantidadCero(t *testing.T) {
 		t.Fatalf("B debe quedar 5, got %v", local[1]["cantidad"])
 	}
 }
+
+func TestMergePendienteInboundReaplicarEsIdempotente(t *testing.T) {
+	meta := db.TableModifiedAtMeta{FechaIsDate: true, HasHoraModificacion: true}
+	local := map[string]interface{}{
+		"cantidad":           4.0,
+		"fecha_modificacion": "2026-11-03",
+		"hora_modificacion":  "12:00:00",
+	}
+	remote := map[string]interface{}{
+		"cantidad":           4.0,
+		"fecha_modificacion": "2026-11-03",
+		"hora_modificacion":  "12:05:00",
+	}
+	got := mergePendienteInbound(local, remote, meta)
+	if got.Delete || len(got.Patch) != 0 {
+		t.Fatalf("misma cantidad no debe generar cambios: %+v", got)
+	}
+}

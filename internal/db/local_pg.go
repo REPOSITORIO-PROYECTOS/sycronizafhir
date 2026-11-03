@@ -612,10 +612,12 @@ func (db *LocalPG) PatchRowColumns(
 
 	isDateColumn, err := db.isFechaModificacionDate(ctx, schemaName, tableName)
 	if err == nil {
+		// Hora de pared de Argentina: el resto de la base (ERP y tienda) graba así.
+		nowLocal := ERPWallClock(time.Now())
 		if isDateColumn {
-			patch["fecha_modificacion"] = time.Now().UTC().Truncate(24 * time.Hour)
+			patch["fecha_modificacion"] = nowLocal.Truncate(24 * time.Hour)
 		} else {
-			patch["fecha_modificacion"] = time.Now().UTC()
+			patch["fecha_modificacion"] = nowLocal
 		}
 	}
 

@@ -899,6 +899,69 @@ func (c *PGClient) LoadUpdatedRows(ctx context.Context, schemaName, tableName st
 	return scanRemoteRows(rows)
 }
 
+// LoadUpdatedRowsLocalClock es como LoadUpdatedRows pero para tablas cuyo
+// fecha_modificacion (+ hora_modificacion) está en hora de pared de Argentina:
+// convierte el checkpoint `since` (instante absoluto) a esa hora antes de
+// comparar, y resta `lookback` como margen de seguridad. Aplicar dos veces la
+// misma fila debe ser idempotente en quien la consume.
+func (c *PGClient) LoadUpdatedRowsLocalClock(ctx context.Context, schemaName, tableName string, since time.Time, lookback time.Duration) ([]map[string]interface{}, error) {
+	if !safeIdentifierRegex.MatchString(schemaName) || !safeIdentifierRegex.MatchString(tableName) {
+		return nil, fmt.Errorf("invalid table identifier %s.%s", schemaName, tableName)
+	}
+	isDateColumn, err := c.isFechaModificacionDate(ctx, schemaName, tableName)
+	if err != nil {
+		return nil, err
+	}
+	hasHora, err := c.hasColumn(ctx, schemaName, tableName, "hora_modificacion")
+	if err != nil {
+		return nil, err
+	}
+	whereClause, arg := LocalClockWhereClause(since, lookback, isDateColumn, hasHora)
+	query := fmt.Sprintf(
+		`SELECT * FROM %s.%s WHERE fecha_modificacion IS NOT NULL AND %s ORDER BY fecha_modificacion ASC`,
+		quoteIdentifier(schemaName),
+		quoteIdentifier(tableName),
+		whereClause,
+	)
+	rows, err := c.pool.Query(ctx, query, arg)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanRemoteRows(rows)
+}
+
+// LocalClockWhereClause arma el filtro y su parámetro ($1, texto) comparando en
+// hora de pared de Argentina. Se pasa como texto para que Postgres no aplique
+// la zona de la sesión (UTC en Supabase).
+func LocalClockWhereClause(since time.Time, lookback time.Duration, isDateColumn, hasHora bool) (string, string) {
+	if lookback < 0 {
+		lookback = 0
+	}
+	local := since.Add(-lookback).In(time.FixedZone("ART", -3*60*60))
+	stamp := local.Format("2006-01-02 15:04:05.999999")
+	switch {
+	case isDateColumn && hasHora:
+		return `(fecha_modificacion::timestamp + COALESCE(hora_modificacion, TIME '00:00:00')) > $1::timestamp`, stamp
+	case isDateColumn:
+		return `fecha_modificacion >= $1::date`, local.Format("2006-01-02")
+	default:
+		return `fecha_modificacion > $1::timestamp`, stamp
+	}
+}
+
+func (c *PGClient) hasColumn(ctx context.Context, schemaName, tableName, columnName string) (bool, error) {
+	const query = `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema = $1 AND table_name = $2 AND column_name = $3)`
+	var exists bool
+	if err := c.pool.QueryRow(ctx, query, schemaName, tableName, columnName).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
 func (c *PGClient) isFechaModificacionDate(ctx context.Context, schemaName, tableName string) (bool, error) {
 	const query = `
 		SELECT data_type

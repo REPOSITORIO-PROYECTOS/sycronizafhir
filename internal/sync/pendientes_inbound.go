@@ -16,6 +16,12 @@ import (
 
 const inboundPendientesStateKey = "inbound_pendientes_last_run_utc"
 
+// inboundPendientesLookback: margen para no perder filas grabadas justo en el
+// borde del ciclo (relojes desfasados, transacciones lentas). Re-aplicar una
+// fila es idempotente: misma cantidad => sin patch; cantidad 0 sobre una fila
+// ya borrada => no hay fila local y se saltea.
+const inboundPendientesLookback = 10 * time.Minute
+
 // pendienteInboundDecision: patch de cantidad o baja en Mica.
 type pendienteInboundDecision struct {
 	Delete bool
@@ -165,7 +171,7 @@ func (w *PendientesInboundWorker) runCycle(ctx context.Context) error {
 		return nil
 	}
 
-	remoteRows, err := w.remotePG.LoadUpdatedRows(ctx, "public", table.Name, w.lastRun)
+	remoteRows, err := w.remotePG.LoadUpdatedRowsLocalClock(ctx, "public", table.Name, w.lastRun, inboundPendientesLookback)
 	if err != nil {
 		return err
 	}
@@ -183,6 +189,9 @@ func (w *PendientesInboundWorker) runCycle(ctx context.Context) error {
 		}
 	}
 
+	// Instante absoluto en UTC; LoadUpdatedRowsLocalClock lo pasa a hora de
+	// Argentina al comparar. Se toma al final del ciclo y el lookback cubre la
+	// ventana entre la lectura y este punto.
 	now := time.Now().UTC()
 	w.lastRun = now
 	if err = w.persistCheckpoint(ctx, now); err != nil {
