@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"sycronizafhir/internal/config"
 	"sycronizafhir/internal/db"
 	"sycronizafhir/internal/monitor"
@@ -34,7 +36,10 @@ func mergePendienteInbound(
 ) pendienteInboundDecision {
 	remoteAt, remoteOK := db.RowModifiedAt(remoteRow, meta)
 	localAt, localOK := db.RowModifiedAt(localRow, meta)
-	remoteNewer := remoteOK && (!localOK || remoteAt.After(localAt))
+	// Supabase guarda hora_modificacion sin milisegundos y el ERP con ms:
+	// comparamos al segundo y, en el mismo segundo, gana Supabase (>=).
+	// Es idempotente: si la cantidad ya coincide no se parchea nada.
+	remoteNewer := remoteOK && (!localOK || !remoteAt.Truncate(time.Second).Before(localAt.Truncate(time.Second)))
 	if !remoteNewer {
 		return pendienteInboundDecision{}
 	}
@@ -61,6 +66,22 @@ func pendienteCantidad(raw interface{}) (float64, bool) {
 		return 0, false
 	}
 	switch typed := raw.(type) {
+	case pgtype.Numeric:
+		// Postgres numeric (ERP y Supabase) llega como pgtype.Numeric; sin este
+		// caso caia en default ("{1000 -2 ...}") y no se aplicaba ningun cambio.
+		if !typed.Valid {
+			return 0, false
+		}
+		f, err := typed.Float64Value()
+		if err != nil || !f.Valid {
+			return 0, false
+		}
+		return f.Float64, true
+	case *pgtype.Numeric:
+		if typed == nil {
+			return 0, false
+		}
+		return pendienteCantidad(*typed)
 	case float64:
 		return typed, true
 	case float32:

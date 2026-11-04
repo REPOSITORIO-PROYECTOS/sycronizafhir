@@ -5,6 +5,11 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.26] - 2026-11-03
+
+### Fixed
+- Inbound pendientes: compara la hora de modificación al segundo. Supabase guarda sin milisegundos y el ERP con milisegundos, así que los cambios hechos en el mismo segundo se descartaban. Ahora, en el mismo segundo, gana Supabase; si la cantidad ya coincide no se toca nada.
+
 ## [1.6.25] - 2026-11-03
 
 ### Corregido
