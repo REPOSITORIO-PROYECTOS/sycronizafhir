@@ -5,6 +5,12 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.27] - 2026-11-03
+
+### Fixed
+- Outbound: tablas con más de 5000 filas cambiadas (p. ej. productos_x_provincias re-fechada entera) se suben por tramos de 2000 con timeout de 90s por tramo, salteando filas ya iguales en la nube y avanzando el checkpoint por tramo. Antes se intentaba la tabla entera en 90s y nunca avanzaba.
+- Cola de reintentos: una sola entrada por tabla, timeout por reintento, y no se guardan copias completas de tablas grandes.
+
 ## [1.6.26] - 2026-11-03
 
 ### Fixed

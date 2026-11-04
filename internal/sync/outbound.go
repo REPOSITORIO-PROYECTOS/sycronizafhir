@@ -144,38 +144,24 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 			continue
 		}
 
+		if len(rows) > outboundChunkThreshold {
+			sent, skipped, chunkErr := w.uploadChunked(ctx, syncCfg, table, rows)
+			if chunkErr != nil {
+				failedTables = append(failedTables, table.Name)
+				log.Printf("outbound %s por tramos fallo (subidas %d, iguales %d): %v", table.Name, sent, skipped, chunkErr)
+				w.runtime.AddLog(fmt.Sprintf("outbound %s: tramos con error tras %d subidas / %d iguales (se retoma el proximo ciclo): %v", table.Name, sent, skipped, chunkErr))
+				continue
+			}
+			sentRows += sent
+			if sent > 0 {
+				tablesWithChanges++
+			}
+			w.runtime.AddLog(fmt.Sprintf("outbound: %s por tramos, subidas %d filas, %d ya iguales en nube", table.Name, sent, skipped))
+			continue
+		}
+
 		tableCtx, cancel := context.WithTimeout(ctx, outboundTableTimeout)
-
-		if table.Name == "productos" && w.imageResolver != nil && w.imageResolver.Enabled() {
-			rows = w.imageResolver.ResolveProductRows(tableCtx, rows)
-		}
-
-		if fields := syncCfg.CloudOwnedFieldsFor(table.Name); len(fields) > 0 {
-			preserved, guardErr := applyCloudOwnedOutboundGuard(tableCtx, w.pgClient, "public", table.Name, table.PrimaryKeys, rows, fields)
-			if guardErr != nil {
-				log.Printf("outbound %s cloud-owned guard skipped: %v", table.Name, guardErr)
-				w.runtime.AddLog(fmt.Sprintf("outbound %s: guarda campos nube omitida (%v)", table.Name, guardErr))
-			} else if preserved > 0 {
-				w.runtime.AddLog(fmt.Sprintf("outbound %s: preservados %d campos propiedad de la nube (no pisar)", table.Name, preserved))
-			}
-		}
-
-		if fields := syncCfg.CloudAuthoritativeFieldsFor(table.Name); len(fields) > 0 {
-			preserved, guardErr := applyCloudAuthoritativeOutboundGuard(tableCtx, w.pgClient, "public", table.Name, table.PrimaryKeys, rows, fields)
-			if guardErr != nil {
-				log.Printf("outbound %s cloud-authoritative guard skipped: %v", table.Name, guardErr)
-				w.runtime.AddLog(fmt.Sprintf("outbound %s: guarda campos autoritativos nube omitida (%v)", table.Name, guardErr))
-			} else if preserved > 0 {
-				w.runtime.AddLog(fmt.Sprintf("outbound %s: preservados %d campos autoritativos nube (prod_orden)", table.Name, preserved))
-			}
-		}
-
-		if preserved, guardErr := applyPedidosPickingEstadoOutboundGuard(tableCtx, w.pgClient, "public", table.Name, table.PrimaryKeys, rows); guardErr != nil {
-			log.Printf("outbound %s picking-estado guard skipped: %v", table.Name, guardErr)
-			w.runtime.AddLog(fmt.Sprintf("outbound %s: guarda estado picking omitida (%v)", table.Name, guardErr))
-		} else if preserved > 0 {
-			w.runtime.AddLog(fmt.Sprintf("outbound %s: preservados %d estado(s) picking en nube (no pisar K/V/E)", table.Name, preserved))
-		}
+		rows = w.applyOutboundGuards(tableCtx, syncCfg, table, rows)
 
 		err = w.pgClient.UpsertRows(tableCtx, "public", table.Name, rows, table.PrimaryKeys)
 		cancel()
@@ -187,7 +173,7 @@ func (w *OutboundWorker) runCycle(ctx context.Context) error {
 			}
 			raw, marshalErr := json.Marshal(payload)
 			if marshalErr == nil {
-				_ = w.queue.Enqueue(ctx, outboundGenericDirection, string(raw))
+				_ = w.replaceQueuedTable(ctx, table.Name, string(raw))
 			}
 			failedTables = append(failedTables, table.Name)
 			if errors.Is(err, context.DeadlineExceeded) {
@@ -292,6 +278,14 @@ func (w *OutboundWorker) retryQueuedOutbound(ctx context.Context) error {
 			continue
 		}
 
+		if len(rows) > outboundChunkThreshold {
+			// Tablas grandes se resuelven por tramos desde el checkpoint; no
+			// reintentar copias completas de la tabla desde la cola.
+			_ = w.queue.Delete(ctx, job.ID)
+			w.runtime.AddLog(fmt.Sprintf("retry outbound: drop cola %s (%d filas, va por tramos)", payload.TableName, len(rows)))
+			continue
+		}
+
 		if payload.TableName == "productos" && w.imageResolver != nil && w.imageResolver.Enabled() {
 			rows = w.imageResolver.ResolveProductRows(ctx, rows)
 		}
@@ -320,7 +314,10 @@ func (w *OutboundWorker) retryQueuedOutbound(ctx context.Context) error {
 			w.runtime.AddLog(fmt.Sprintf("retry outbound %s: preservados %d estado(s) picking en nube", payload.TableName, preserved))
 		}
 
-		if err = w.pgClient.UpsertRows(ctx, "public", payload.TableName, rows, payload.ConflictColumns); err != nil {
+		jobCtx, jobCancel := context.WithTimeout(ctx, outboundTableTimeout)
+		err = w.pgClient.UpsertRows(jobCtx, "public", payload.TableName, rows, payload.ConflictColumns)
+		jobCancel()
+		if err != nil {
 			failedJobs = append(failedJobs, fmt.Sprintf("%d:%s", job.ID, payload.TableName))
 			log.Printf("retry queued outbound job failed id=%d table=%s: %v", job.ID, payload.TableName, err)
 			w.runtime.AddLog(fmt.Sprintf("retry queued outbound failed id=%d table=%s: %v", job.ID, payload.TableName, err))
@@ -582,4 +579,45 @@ func collectProductoIDs(rows []map[string]interface{}, maxItems int) []string {
 		}
 	}
 	return out
+}
+
+// applyOutboundGuards aplica las guardas de campos de la nube (cloud-owned,
+// cloud-authoritative, estado picking) antes de subir filas.
+func (w *OutboundWorker) applyOutboundGuards(
+	ctx context.Context,
+	syncCfg config.SyncTablesConfig,
+	table db.SyncTable,
+	rows []map[string]interface{},
+) []map[string]interface{} {
+	if table.Name == "productos" && w.imageResolver != nil && w.imageResolver.Enabled() {
+		rows = w.imageResolver.ResolveProductRows(ctx, rows)
+	}
+
+	if fields := syncCfg.CloudOwnedFieldsFor(table.Name); len(fields) > 0 {
+		preserved, guardErr := applyCloudOwnedOutboundGuard(ctx, w.pgClient, "public", table.Name, table.PrimaryKeys, rows, fields)
+		if guardErr != nil {
+			log.Printf("outbound %s cloud-owned guard skipped: %v", table.Name, guardErr)
+			w.runtime.AddLog(fmt.Sprintf("outbound %s: guarda campos nube omitida (%v)", table.Name, guardErr))
+		} else if preserved > 0 {
+			w.runtime.AddLog(fmt.Sprintf("outbound %s: preservados %d campos propiedad de la nube (no pisar)", table.Name, preserved))
+		}
+	}
+
+	if fields := syncCfg.CloudAuthoritativeFieldsFor(table.Name); len(fields) > 0 {
+		preserved, guardErr := applyCloudAuthoritativeOutboundGuard(ctx, w.pgClient, "public", table.Name, table.PrimaryKeys, rows, fields)
+		if guardErr != nil {
+			log.Printf("outbound %s cloud-authoritative guard skipped: %v", table.Name, guardErr)
+			w.runtime.AddLog(fmt.Sprintf("outbound %s: guarda campos autoritativos nube omitida (%v)", table.Name, guardErr))
+		} else if preserved > 0 {
+			w.runtime.AddLog(fmt.Sprintf("outbound %s: preservados %d campos autoritativos nube (prod_orden)", table.Name, preserved))
+		}
+	}
+
+	if preserved, guardErr := applyPedidosPickingEstadoOutboundGuard(ctx, w.pgClient, "public", table.Name, table.PrimaryKeys, rows); guardErr != nil {
+		log.Printf("outbound %s picking-estado guard skipped: %v", table.Name, guardErr)
+		w.runtime.AddLog(fmt.Sprintf("outbound %s: guarda estado picking omitida (%v)", table.Name, guardErr))
+	} else if preserved > 0 {
+		w.runtime.AddLog(fmt.Sprintf("outbound %s: preservados %d estado(s) picking en nube (no pisar K/V/E)", table.Name, preserved))
+	}
+	return rows
 }
