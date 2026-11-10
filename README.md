@@ -104,7 +104,7 @@ go build -o sycronizafhir.exe .
 
 - Resultado esperado:
   - `dist/sycronizafhir-installer/` con binarios y scripts de instalación.
-    Incluye `sycronizafhir-win10plus-amd64.exe`, `sync-table.exe` y `compare-counts.exe`.
+    Incluye `sycronizafhir-win10plus-amd64.exe`, `sync-table.exe`, `compare-counts.exe` y `copy-bultos-factura.exe`.
   - `dist/sycronizafhir-installer-package.zip` para distribución/auto-update.
   - `dist/agencia-ta-soluciones-setup.exe` si Inno Setup 6 está instalado en la máquina de build.
 

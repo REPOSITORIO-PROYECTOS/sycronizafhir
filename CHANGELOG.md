@@ -5,6 +5,14 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.28] - 2026-11-10
+
+### Añadido
+
+- **Copia `facturas_vtas.bultos` → `pedidos.bultos`**: worker `bultos_factura` completa el pedido cuando está vacío (NULL o 0), usando la factura más reciente por `ped_id` en una ventana de 30 días. Copia solo valores entre 1 y 30. Nunca pisa un valor ya cargado ni escribe en la factura. Los valores mayores a 30 se dejan sin copiar y se registran para revisar.
+- **Dry-run por defecto** (`BULTOS_FACTURA_DRY_RUN=true`): el worker solo registra lo que haría. El log JSONL (`%APPDATA%\sycronizafhir\errores\estado\bultos_factura.jsonl`) guarda `ped_id`, valor anterior, valor nuevo, factura y timestamp, para auditoría y rollback.
+- **CLI `copy-bultos-factura`**: una pasada suelta; `-dry-run` (default) o `-apply` para escribir. Misma regla y mismo log.
+
 ## [1.6.26] - 2026-11-03
 
 ### Fixed
