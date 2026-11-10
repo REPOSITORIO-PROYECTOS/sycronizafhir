@@ -11,7 +11,8 @@ $appExeName = "sycronizafhir-win10plus-amd64.exe"
 $launcherExeName = "sycronizafhir-setup-launcher.exe"
 $helperBinaries = @(
     @{ Path = "./cmd/sync-table"; Name = "sync-table.exe" },
-    @{ Path = "./cmd/compare-counts"; Name = "compare-counts.exe" }
+    @{ Path = "./cmd/compare-counts"; Name = "compare-counts.exe" },
+    @{ Path = "./cmd/copy-bultos-factura"; Name = "copy-bultos-factura.exe" }
 )
 $wailsBuildOutput = Join-Path $root "build\bin\sycronizafhir.exe"
 

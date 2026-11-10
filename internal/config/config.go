@@ -13,39 +13,44 @@ import (
 )
 
 type Config struct {
-	LocalPostgresURL    string
-	DBSourceMode        string
-	DBSourcePriority    []string
-	SQLitePath          string
-	SupabaseURL         string
-	SupabaseServiceRole string
-	SupabaseRealtimeURL string
-	SupabaseDBHost      string
-	SupabaseDBPort      int
-	SupabaseDBUser      string
-	SupabaseDBPassword  string
-	SupabaseDBName      string
-	SupabaseDBSSLMode   string
-	SupabaseDBURL       string
-	OutboundInterval    time.Duration
-	DeviceID            string
-	DevicePresenceEvery time.Duration
-	RealtimeChannel     string
-	RealtimeSchema      string
-	RealtimeTable       string
-	SourceSchema        string
-	ExcludeTables       []string
-	BootstrapChunkSize  int
-	AuditInterval       time.Duration
+	LocalPostgresURL            string
+	DBSourceMode                string
+	DBSourcePriority            []string
+	SQLitePath                  string
+	SupabaseURL                 string
+	SupabaseServiceRole         string
+	SupabaseRealtimeURL         string
+	SupabaseDBHost              string
+	SupabaseDBPort              int
+	SupabaseDBUser              string
+	SupabaseDBPassword          string
+	SupabaseDBName              string
+	SupabaseDBSSLMode           string
+	SupabaseDBURL               string
+	OutboundInterval            time.Duration
+	DeviceID                    string
+	DevicePresenceEvery         time.Duration
+	RealtimeChannel             string
+	RealtimeSchema              string
+	RealtimeTable               string
+	SourceSchema                string
+	ExcludeTables               []string
+	BootstrapChunkSize          int
+	AuditInterval               time.Duration
 	InboundClientesInterval     time.Duration
 	InboundPedidosInterval      time.Duration
 	InboundPedidoPaginaInterval time.Duration
 	InboundPendientesInterval   time.Duration
 	ImageSyncEnabled            bool
-	ImageSyncInterval      time.Duration
-	ImageSyncAutoBatch     int
-	ImageLocalBasePath     string
-	StorageBucketProductos string
+	ImageSyncInterval           time.Duration
+	ImageSyncAutoBatch          int
+	ImageLocalBasePath          string
+	StorageBucketProductos      string
+	BultosFacturaEnabled        bool
+	BultosFacturaDryRun         bool
+	BultosFacturaMax            int
+	BultosFacturaWindowDays     int
+	BultosFacturaInterval       time.Duration
 }
 
 func Load() (Config, error) {
@@ -104,45 +109,63 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	bultosFacturaMax, err := readIntWithDefault("BULTOS_FACTURA_MAX", 30)
+	if err != nil {
+		return Config{}, err
+	}
+	bultosFacturaWindowDays, err := readIntWithDefault("BULTOS_FACTURA_WINDOW_DAYS", 30)
+	if err != nil {
+		return Config{}, err
+	}
+	bultosFacturaSeconds, err := readIntWithDefault("BULTOS_FACTURA_INTERVAL_SECONDS", 60)
+	if err != nil {
+		return Config{}, err
+	}
+
 	sqlitePath, err := ResolveSQLiteQueuePath(readStringWithDefault("SQLITE_QUEUE_PATH", "./sync_queue.db"))
 	if err != nil {
 		return Config{}, fmt.Errorf("resolve SQLITE_QUEUE_PATH: %w", err)
 	}
 
 	cfg := Config{
-		LocalPostgresURL:    os.Getenv("LOCAL_POSTGRES_URL"),
-		DBSourceMode:        readStringWithDefault("DB_SOURCE_MODE", "manual"),
-		DBSourcePriority:    readCSVWithDefault("DB_SOURCE_PRIORITY", []string{"docker", "local"}),
-		SQLitePath:          sqlitePath,
-		SupabaseURL:         os.Getenv("SUPABASE_URL"),
-		SupabaseServiceRole: resolveSupabaseServiceRoleKey(),
-		SupabaseRealtimeURL: os.Getenv("SUPABASE_REALTIME_URL"),
-		SupabaseDBHost:      os.Getenv("HOST_SUPABASE"),
-		SupabaseDBPort:      readIntOrDefaultNoError("PUERTO_SUPABASE", 5432),
-		SupabaseDBUser:      os.Getenv("USUARIO_SUPABASE"),
-		SupabaseDBPassword:  os.Getenv("CONTRASENA_SUPABASE"),
-		SupabaseDBName:      readStringWithDefault("SUPABASE_DB_NAME", "postgres"),
-		SupabaseDBSSLMode:   readStringWithDefault("SUPABASE_DB_SSLMODE", "require"),
-		SupabaseDBURL:       os.Getenv("SUPABASE_DB_URL"),
-		OutboundInterval:    time.Duration(intervalSeconds) * time.Second,
-		DeviceID:            strings.TrimSpace(os.Getenv("DEVICE_ID")),
-		DevicePresenceEvery: time.Duration(presenceSeconds) * time.Second,
-		RealtimeChannel:     readStringWithDefault("SUPABASE_REALTIME_CHANNEL", "realtime:public:pedidos"),
-		RealtimeSchema:      readStringWithDefault("SUPABASE_REALTIME_SCHEMA", "public"),
-		RealtimeTable:       readStringWithDefault("SUPABASE_REALTIME_TABLE", "pedidos"),
-		SourceSchema:        readStringWithDefault("SYNC_SOURCE_SCHEMA", "public"),
-		ExcludeTables:       readCSV("SYNC_EXCLUDE_TABLES"),
-		BootstrapChunkSize:       bootstrapChunkSize,
-		AuditInterval:            time.Duration(auditHours) * time.Hour,
+		LocalPostgresURL:            os.Getenv("LOCAL_POSTGRES_URL"),
+		DBSourceMode:                readStringWithDefault("DB_SOURCE_MODE", "manual"),
+		DBSourcePriority:            readCSVWithDefault("DB_SOURCE_PRIORITY", []string{"docker", "local"}),
+		SQLitePath:                  sqlitePath,
+		SupabaseURL:                 os.Getenv("SUPABASE_URL"),
+		SupabaseServiceRole:         resolveSupabaseServiceRoleKey(),
+		SupabaseRealtimeURL:         os.Getenv("SUPABASE_REALTIME_URL"),
+		SupabaseDBHost:              os.Getenv("HOST_SUPABASE"),
+		SupabaseDBPort:              readIntOrDefaultNoError("PUERTO_SUPABASE", 5432),
+		SupabaseDBUser:              os.Getenv("USUARIO_SUPABASE"),
+		SupabaseDBPassword:          os.Getenv("CONTRASENA_SUPABASE"),
+		SupabaseDBName:              readStringWithDefault("SUPABASE_DB_NAME", "postgres"),
+		SupabaseDBSSLMode:           readStringWithDefault("SUPABASE_DB_SSLMODE", "require"),
+		SupabaseDBURL:               os.Getenv("SUPABASE_DB_URL"),
+		OutboundInterval:            time.Duration(intervalSeconds) * time.Second,
+		DeviceID:                    strings.TrimSpace(os.Getenv("DEVICE_ID")),
+		DevicePresenceEvery:         time.Duration(presenceSeconds) * time.Second,
+		RealtimeChannel:             readStringWithDefault("SUPABASE_REALTIME_CHANNEL", "realtime:public:pedidos"),
+		RealtimeSchema:              readStringWithDefault("SUPABASE_REALTIME_SCHEMA", "public"),
+		RealtimeTable:               readStringWithDefault("SUPABASE_REALTIME_TABLE", "pedidos"),
+		SourceSchema:                readStringWithDefault("SYNC_SOURCE_SCHEMA", "public"),
+		ExcludeTables:               readCSV("SYNC_EXCLUDE_TABLES"),
+		BootstrapChunkSize:          bootstrapChunkSize,
+		AuditInterval:               time.Duration(auditHours) * time.Hour,
 		InboundClientesInterval:     time.Duration(inboundClientesSeconds) * time.Second,
 		InboundPedidosInterval:      time.Duration(inboundPedidosSeconds) * time.Second,
 		InboundPedidoPaginaInterval: time.Duration(inboundPedidoPaginaSeconds) * time.Second,
 		InboundPendientesInterval:   time.Duration(inboundPendientesSeconds) * time.Second,
 		ImageSyncEnabled:            readBoolWithDefault("IMAGE_SYNC_ENABLED", true),
-		ImageSyncInterval:        time.Duration(imageSyncSeconds) * time.Second,
-		ImageSyncAutoBatch:       imageSyncAutoBatch,
-		ImageLocalBasePath:       readStringWithDefault("IMAGE_LOCAL_BASE_PATH", `C:\Sys_Image`),
-		StorageBucketProductos:   readStringWithDefault("SUPABASE_STORAGE_BUCKET_PRODUCTOS", "productos"),
+		ImageSyncInterval:           time.Duration(imageSyncSeconds) * time.Second,
+		ImageSyncAutoBatch:          imageSyncAutoBatch,
+		ImageLocalBasePath:          readStringWithDefault("IMAGE_LOCAL_BASE_PATH", `C:\Sys_Image`),
+		StorageBucketProductos:      readStringWithDefault("SUPABASE_STORAGE_BUCKET_PRODUCTOS", "productos"),
+		BultosFacturaEnabled:        readBoolWithDefault("BULTOS_FACTURA_ENABLED", true),
+		BultosFacturaDryRun:         readBoolWithDefault("BULTOS_FACTURA_DRY_RUN", true),
+		BultosFacturaMax:            bultosFacturaMax,
+		BultosFacturaWindowDays:     bultosFacturaWindowDays,
+		BultosFacturaInterval:       time.Duration(bultosFacturaSeconds) * time.Second,
 	}
 
 	if override, ok, overrideErr := LoadLocalDBOverride(); overrideErr == nil && ok {

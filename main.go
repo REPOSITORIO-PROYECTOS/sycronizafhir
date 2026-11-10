@@ -381,6 +381,7 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 	pedidoPaginaInbound := syncworker.NewPedidoPaginaInboundWorker(localPG, supabasePG, queueDB, *cfg, rt)
 	pedidoPaginaEstadoOutbound := syncworker.NewPedidoPaginaEstadoOutboundWorker(localPG, supabasePG, *cfg, rt)
 	pendientesInbound := syncworker.NewPendientesInboundWorker(localPG, supabasePG, queueDB, *cfg, rt)
+	bultosFactura := syncworker.NewBultosFacturaWorker(localPG, *cfg, rt)
 
 	rt.SetMeta("audit_every", cfg.AuditInterval.String())
 	rt.SetMeta("image_sync_every", cfg.ImageSyncInterval.String())
@@ -388,6 +389,8 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 	rt.SetMeta("inbound_pedidos_every", cfg.InboundPedidosInterval.String())
 	rt.SetMeta("inbound_pedido_pagina_every", cfg.InboundPedidoPaginaInterval.String())
 	rt.SetMeta("inbound_pendientes_every", cfg.InboundPendientesInterval.String())
+	rt.SetMeta("bultos_factura_every", cfg.BultosFacturaInterval.String())
+	rt.SetMeta("bultos_factura_dry_run", fmt.Sprintf("%v", cfg.BultosFacturaDryRun))
 	rt.SetMeta("storage_bucket_productos", cfg.StorageBucketProductos)
 
 	workers := []struct {
@@ -404,6 +407,7 @@ func bootSyncWorkers(ctx context.Context, rt *monitor.Runtime, cfg *config.Confi
 		{"pedido_pagina_inbound", pedidoPaginaInbound.Run},
 		{"pedido_pagina_estado_outbound", pedidoPaginaEstadoOutbound.Run},
 		{"pendientes_inbound", pendientesInbound.Run},
+		{"bultos_factura", bultosFactura.Run},
 	}
 
 	wg := &sync.WaitGroup{}
