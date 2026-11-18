@@ -50,7 +50,8 @@ type Config struct {
 
 func Load() (Config, error) {
 	loadDotEnvFiles()
-	applyEmbeddedDefaults()
+	// Desde 1.6.27 no hay credenciales embebidas en el binario: todo sale del .env
+	// (junto al ejecutable) o del entorno. Si falta algo, Load() falla con la lista.
 
 	intervalSeconds, err := readIntWithDefault("OUTBOUND_INTERVAL_SECONDS", 60)
 	if err != nil {
@@ -152,20 +153,8 @@ func Load() (Config, error) {
 	cfg.DBSourceMode = normalizeSourceMode(cfg.DBSourceMode)
 	cfg.DBSourcePriority = normalizeSourcePriority(cfg.DBSourcePriority)
 
-	if cfg.LocalPostgresURL == "" && cfg.DBSourceMode != "auto-fallback" {
-		return Config{}, errors.New("LOCAL_POSTGRES_URL is required")
-	}
-
-	if cfg.SupabaseDBHost == "" || cfg.SupabaseDBUser == "" || cfg.SupabaseDBPassword == "" {
-		return Config{}, errors.New("HOST_SUPABASE, USUARIO_SUPABASE and CONTRASENA_SUPABASE are required")
-	}
-
-	if strings.TrimSpace(cfg.SupabaseRealtimeURL) == "" {
-		return Config{}, errors.New("SUPABASE_REALTIME_URL is required")
-	}
-
-	if strings.TrimSpace(cfg.SupabaseServiceRole) == "" {
-		return Config{}, errors.New("SUPABASE_SERVICE_ROLE_KEY is required")
+	if err := validateRequired(cfg); err != nil {
+		return Config{}, err
 	}
 
 	if isPlaceholderSecret(cfg.SupabaseServiceRole) {
@@ -176,8 +165,8 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	if cfg.ImageSyncEnabled && strings.TrimSpace(cfg.SupabaseURL) == "" {
-		return Config{}, errors.New("SUPABASE_URL is required when IMAGE_SYNC_ENABLED=true")
+	if err := validateSameSupabaseProject(cfg); err != nil {
+		return Config{}, err
 	}
 
 	return cfg, nil

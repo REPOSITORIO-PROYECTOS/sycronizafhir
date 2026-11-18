@@ -177,7 +177,9 @@ func runWithWindow() {
 
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		// Dejar el motivo también en app.log (sin config no hay ventana útil).
+		log.SetOutput(io.MultiWriter(os.Stderr, support.NewFileLogWriter()))
+		log.Fatalf("error | config | %v", err)
 	}
 
 	rt := monitor.NewRuntime()

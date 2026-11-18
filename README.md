@@ -26,8 +26,8 @@ Versión actual del producto: archivo [`VERSION`](VERSION). Historial de release
 
 ## Configuracion
 
-1. Copiar `.env.example` a `.env`.
-2. Completar credenciales.
+1. Copiar `.env.example` a `.env` (en producción: `C:\Program Files\sycronizafhir\.env`, junto al exe).
+2. Completar credenciales. **El binario no trae credenciales ni proyecto Supabase por defecto**: si falta una variable obligatoria (`LOCAL_POSTGRES_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_REALTIME_URL` y `SUPABASE_DB_URL` o `HOST_SUPABASE`/`USUARIO_SUPABASE`/`CONTRASENA_SUPABASE`) la app no arranca y lo deja en `errores\app.log`. También se niega a arrancar si las variables apuntan a proyectos Supabase distintos.
 3. Configurar `SYNC_SOURCE_SCHEMA` y `SYNC_EXCLUDE_TABLES` para controlar que tablas se sincronizan.
 
 ### Sync analitico de esquema (outbound)

@@ -5,6 +5,16 @@ Versiones alineadas con el archivo [`VERSION`](VERSION) en la raíz del reposito
 
 ## [Unreleased]
 
+## [1.6.27] - 2026-11-17
+
+### Seguridad
+- **Sin credenciales embebidas**: se eliminó `internal/config/embedded_defaults.go` (valores ofuscados de base, service_role, SMTP y base local). Toda la configuración sale del `.env` junto al exe o del entorno. Las credenciales que estaban embebidas en versiones anteriores deben considerarse expuestas y rotarse.
+
+### Cambiado
+- Si falta configuración obligatoria la app no arranca y lista todas las variables faltantes (antes completaba con valores del proyecto anterior). En modo ventana el error queda también en `errores\app.log`.
+- Validación nueva: si `SUPABASE_URL`, `SUPABASE_REALTIME_URL`, la service_role y la base apuntan a proyectos Supabase distintos, no arranca.
+- `SUPABASE_URL` pasa a ser obligatoria siempre.
+
 ## [1.6.26] - 2026-11-03
 
 ### Fixed
